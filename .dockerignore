@@ -1,0 +1,8 @@
+build/
+.venv/
+venv/
+*.egg-info/
+.git
+test/
+work/
+*.log*
