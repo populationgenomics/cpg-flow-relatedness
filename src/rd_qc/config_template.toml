@@ -1,0 +1,6 @@
+[workflow]
+
+input_cohorts = []
+sequencing_type = 'genome'
+
+status_reporter = 'metamist'
