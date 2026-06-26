@@ -3,13 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-# TODO(you): update this to reflect the project's name & description
-name='workflow_name'
+name='cpg_flow_rd_qc'
 description='Template workflow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
 requires-python = ">=3.10,<3.12"
-version="0.1.1"
+version="0.0.1"
 license={ "file" = "LICENSE" }
 classifiers=[
     'Environment :: Console',
@@ -26,8 +25,7 @@ dependencies=[
 ]
 
 [project.urls]
-# TODO(you): update this to reflect the project's official homepage
-Repository = "https://github.com/populationgenomics/workflow_name"
+Repository = "https://github.com/populationgenomics/cpg-flow-rd-qc"
 
 [project.optional-dependencies]
 test = [
@@ -37,8 +35,7 @@ test = [
 ]
 
 [project.scripts]
-# the workflow runner script - entrypoint for the pipeline
-run_workflow = 'workflow_name.run_workflow:cli_main'
+run_workflow = 'workflow_name.stages:cli_main'
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/workflow_name"]
