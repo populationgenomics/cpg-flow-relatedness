@@ -3,10 +3,16 @@ suggested location for any utility methods or constants used across multiple sta
 """
 
 from dataclasses import dataclass
+import re
 from functools import cache
 
-from metamist import graphql
+from cpg_utils.config import config_retrieve
+from loguru import logger
+from metamist.graphql import gql, query
 
+_CRAM_PATTERN = re.compile(r'\.cram$')
+_GVCF_PATTERN = re.compile(r'\.g\.vcf(\.gz)?$')
+_VCF_PATTERN = re.compile(r'\.vcf(\.gz)?$')
 
 SG_QUERY = graphql.gql(
     """
@@ -22,6 +28,48 @@ ANALYSIS_QUERY = graphql.gql(
     """
 )
 
+SG_QUERY = gql("""
+    query ProjectSomalier($project: String!) {
+        project(name: $project) {
+            sequencingGroups {
+                id
+                sample {
+                    participant {
+                        externalId
+                    }
+                }
+                analyses(type: {eq: "somalier"}) {
+                    output
+                    meta
+                }
+            }
+        }
+    }
+""")
+
+ANALYSIS_QUERY = gql("""
+    query SgAnalyses($project: String!, $sgIds: [String!]!) {
+        project(name: $project) {
+            sequencingGroups(id: {in_: $sgIds}) {
+                id
+                analyses(type: {in_: ["cram", "gvcf", "vcf"]}) {
+                    output
+                    type
+                    meta
+                }
+            }
+        }
+    }
+""")
+
+PEDIGREE_QUERY = gql("""
+    query ProjectPedigree($project: String!) {
+        project(name: $project) {
+            pedigree
+        }
+    }
+""")
+
 @dataclass
 class SomalierDataclass:
     """optional dataclass for Somalier results linked to a sgid."""
@@ -30,33 +78,49 @@ class SomalierDataclass:
 
 
 @cache
-def get_project_sgs_and_fingerprints(project: str):
+def get_project_sgs_and_fingerprints(project: str) -> dict[str, dict[str, str | None]]:
     """
-    Take the project name, make a parameterised SG_QUERY, and process the outputs
-    The returned data should preserve:
-        - participant ID at the top level
-        - each SG ID
-        - the path to a somalier file, or None if there isn't one from the SGID
+    Query metamist for all SGs in the project, grouped by participant.
 
-    The output from this method could be a dictionary structure:
-    {
-        participant_id: {
-            sgid: somalier filepath | None,
-            sgid: somalier filepath | None,
-            sgid: somalier filepath | None
+    Returns:
+        {
+            participant_external_id: {
+                sg_id: somalier_filepath | None,
+                ...
+            },
             ...
-        },
-        participant_id_2: ...
-    }
+        }
     """
-    pass
+    response = query(SG_QUERY, variables={'project': project})
 
-def find_sgids_without_somalier():
+    result: dict[str, dict[str, str | None]] = {}
+    for sg in response['project']['sequencingGroups']:
+        sg_id = sg['id']
+        participant_id = sg['sample']['participant']['externalId']
+        analyses = sg.get('analyses', [])
+        somalier_path = analyses[0]['output'] if analyses else None
+
+        if participant_id not in result:
+            result[participant_id] = {}
+        result[participant_id][sg_id] = somalier_path
+
+    return result
+
+
+
+
+def find_sgids_without_somalier(
+    all_sgid_somaliers: dict[str, dict[str, str | None]],
+) -> set[str]:
     """
-    Takes input from the method above, processes it to find all SGIDs without a somalier extract.
-    Should return a set of SGID strings. Could be cached, but the object will be large-ish, so would bloat the cache.
-    Unless the cache matches objects on ID instead of contents... in which case it would be super quick.
+    Find all SG IDs across all participants that don't have a somalier fingerprint.
     """
+    missing = set()
+    for sgid_map in all_sgid_somaliers.values():
+        for sg_id, somalier_path in sgid_map.items():
+            if somalier_path is None:
+                missing.add(sg_id)
+    return missing
 
 
 @cache
