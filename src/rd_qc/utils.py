@@ -74,6 +74,7 @@ def select_somalier_extract_targets(project: str, sgids: list[str]) -> dict[str,
     > this should re-used the existing logic from JA's somalier implementation, choosing from available data types
     except for one detail - if a short-read SG ID doesn't have a Somalier file, this should throw an error
     maybe the error vs. warning should be behind a config flag, but we expect all short-read CRAMs to have a somalier file
+
+    We also want to remove the possibility of picking up RNA-seq 'cram' analyses
     """
     pass
-
