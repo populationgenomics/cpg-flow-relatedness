@@ -76,49 +76,39 @@ def _resolve_project(project: str) -> str:
     return project
 
 @cache
+def _query_project_sgs(project: str) -> list[dict]:
+    """Cached metamist query — returns raw response data."""
+    resolved = _resolve_project(project)
+    response = query(SG_QUERY, variables={'project': resolved})
+    return response['project']['sequencingGroups']
+
+@cache
 def get_project_sgs_and_fingerprints(project: str) -> dict[str, dict[str, str | None]]:
     """
-    Query metamist for all SGs in the project, grouped by participant.
+    Query metamist for all SGs in the project with their somalier fingerprint status.
+    Returns a SomalierIndex with O(1) lookup by participant or sg_id.
 
-    Returns:
-        {
-            participant_external_id: {
-                sg_id: somalier_filepath | None,
-                ...
-            },
-            ...
-        }
+    Builds fresh SgSomalierInfo instances each call (safe to mutate)
+    while the underlying metamist query is cached.
     """
-    response = query(SG_QUERY, variables={'project': project})
+    raw_sgs = _query_project_sgs(project)
 
-    result: dict[str, dict[str, str | None]] = {}
-    for sg in response['project']['sequencingGroups']:
+    entries = []
+    for sg in raw_sgs:
         sg_id = sg['id']
         participant_id = sg['sample']['participant']['externalId']
         analyses = sg.get('analyses', [])
         somalier_path = analyses[0]['output'] if analyses else None
+        entries.append(SgSomalierInfo(sg_id=sg_id, participant_id=participant_id, somalier_path=somalier_path))
 
-        if participant_id not in result:
-            result[participant_id] = {}
-        result[participant_id][sg_id] = somalier_path
-
-    return result
+    return SomalierIndex(entries)
 
 
 
 
-def find_sgids_without_somalier(
-    all_sgid_somaliers: dict[str, dict[str, str | None]],
-) -> set[str]:
-    """
-    Find all SG IDs across all participants that don't have a somalier fingerprint.
-    """
-    missing = set()
-    for sgid_map in all_sgid_somaliers.values():
-        for sg_id, somalier_path in sgid_map.items():
-            if somalier_path is None:
-                missing.add(sg_id)
-    return missing
+def find_sgids_without_somalier(index: SomalierIndex) -> set[str]:
+    """Find all SG IDs that don't have a somalier fingerprint."""
+    return {info.sg_id for info in index.by_sg.values() if info.somalier_path is None}
 
 
 def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
@@ -190,7 +180,7 @@ def get_project_pedigree(project: str) -> list[dict]:
 
 def build_ped_content(
     project: str,
-    sg_participant_map: dict[str, str],
+    index: SomalierIndex,
 ) -> str:
     """
     Build a complete PED file string with SG IDs as individual identifiers.
@@ -202,7 +192,7 @@ def build_ped_content(
 
     Args:
         project: metamist project name
-        sg_participant_map: {sg_id: external_participant_id}
+        index: SomalierIndex with participant and SG data
 
     Returns:
         PED file content as a string (6-column format, tab-delimited)
@@ -211,8 +201,8 @@ def build_ped_content(
 
     # Build reverse mapping: participant_external_id -> [sg_id, ...]
     participant_to_sgs: dict[str, list[str]] = {}
-    for sg_id, participant_id in sg_participant_map.items():
-        participant_to_sgs.setdefault(participant_id, []).append(sg_id)
+    for info in index.by_sg.values():
+        participant_to_sgs.setdefault(info.participant_id, []).append(info.sg_id)
 
     # For ID substitution in paternal/maternal fields, pick first SG per participant
     participant_to_primary_sg: dict[str, str] = {}
