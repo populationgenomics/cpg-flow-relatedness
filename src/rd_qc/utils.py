@@ -3,7 +3,6 @@ suggested location for any utility methods or constants used across multiple sta
 """
 
 from dataclasses import dataclass
-import re
 from functools import cache
 
 from cpg_utils.config import config_retrieve
@@ -82,8 +81,7 @@ def _query_project_sgs(project: str) -> list[dict]:
     response = query(SG_QUERY, variables={'project': resolved})
     return response['project']['sequencingGroups']
 
-@cache
-def get_project_sgs_and_fingerprints(project: str) -> dict[str, dict[str, str | None]]:
+def get_project_sgs_and_fingerprints(project: str) -> SomalierIndex:
     """
     Query metamist for all SGs in the project with their somalier fingerprint status.
     Returns a SomalierIndex with O(1) lookup by participant or sg_id.
