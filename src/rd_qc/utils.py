@@ -10,23 +10,6 @@ from cpg_utils.config import config_retrieve
 from loguru import logger
 from metamist.graphql import gql, query
 
-_CRAM_PATTERN = re.compile(r'\.cram$')
-_GVCF_PATTERN = re.compile(r'\.g\.vcf(\.gz)?$')
-_VCF_PATTERN = re.compile(r'\.vcf(\.gz)?$')
-
-SG_QUERY = graphql.gql(
-    """
-    a query here to take a project name as a parameter,
-    query for all participants in the dataset, and all SGs
-    for each SG all analyses of type 'somalier'
-    """
-)
-ANALYSIS_QUERY = graphql.gql(
-    """
-    a query here to take a project name and list of SGIDs as a parameter,
-    query for all analyses of type gVCF, VCF, CRAM in the project for each
-    """
-)
 
 SG_QUERY = gql("""
     query ProjectSomalier($project: String!) {
@@ -71,10 +54,21 @@ PEDIGREE_QUERY = gql("""
 """)
 
 @dataclass
-class SomalierDataclass:
-    """optional dataclass for Somalier results linked to a sgid."""
-    sgid: str
-    somalier_file: str | None
+class SgSomalierInfo:
+    """Somalier fingerprint state for a single sequencing group."""
+    sg_id: str
+    participant_id: str
+    somalier_path: str | None
+
+class SomalierIndex:
+    """Dual-indexed view of somalier data: O(1) lookup by participant or sg_id."""
+
+    def __init__(self, entries: list[SgSomalierInfo]):
+        self.by_participant: dict[str, list[SgSomalierInfo]] = {}
+        self.by_sg: dict[str, SgSomalierInfo] = {}
+        for info in entries:
+            self.by_participant.setdefault(info.participant_id, []).append(info)
+            self.by_sg[info.sg_id] = info
 
 def _resolve_project(project: str) -> str:
     if config_retrieve(['workflow', 'access_level']) == 'test' and not project.endswith('-test'):
