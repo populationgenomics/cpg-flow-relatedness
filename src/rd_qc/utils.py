@@ -102,8 +102,6 @@ def get_project_sgs_and_fingerprints(project: str) -> SomalierIndex:
     return SomalierIndex(entries)
 
 
-
-
 def find_sgids_without_somalier(index: SomalierIndex) -> set[str]:
     """Find all SG IDs that don't have a somalier fingerprint."""
     return {info.sg_id for info in index.by_sg.values() if info.somalier_path is None}
