@@ -15,7 +15,7 @@ def identity_check_jobs(
 ) -> list[BashJob]:
     """
     Run somalier relate on all fingerprints for a single participant,
-    then check self-relatedness and alert via Slack.
+    then check self-relatedness, alert via Slack, and register results in metamist.
 
     Returns [relate_job, check_job].
     """
@@ -43,15 +43,21 @@ mv results.html {relate_j.html}
 """
     relate_j.command(cmd)
 
-    batch_instance.write_output(relate_j.pairs_tsv, str(output_prefix) + '.pairs.tsv')
-    batch_instance.write_output(relate_j.samples_tsv, str(output_prefix) + '.samples.tsv')
-    batch_instance.write_output(relate_j.html, str(output_prefix) + '.html')
+    pairs_out = str(output_prefix) + '.pairs.tsv'
+    samples_out = str(output_prefix) + '.samples.tsv'
+    html_out = str(output_prefix) + '.html'
 
-    # Job 2: check self-relatedness + Slack alert
+    batch_instance.write_output(relate_j.pairs_tsv, pairs_out)
+    batch_instance.write_output(relate_j.samples_tsv, samples_out)
+    batch_instance.write_output(relate_j.html, html_out)
+
+    # Job 2: check self-relatedness + Slack alert + register in metamist
     kinship_threshold = config.config_retrieve(
         ['workflow', 'somalier_self_check', 'kinship_threshold'],
         0.9,
     )
+    sg_ids_str = ','.join(sorted(somalier_paths.keys()))
+
     check_j = batch_instance.new_bash_job(
         f'Somalier identity alert {participant_id}',
         job_attrs,
@@ -66,7 +72,11 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     --pairs-tsv {relate_j.pairs_tsv} \\
     --participant-id {participant_id} \\
     --dataset {dataset_name} \\
-    --kinship-threshold {kinship_threshold}
+    --kinship-threshold {kinship_threshold} \\
+    --sg-ids {sg_ids_str} \\
+    --output-pairs {pairs_out} \\
+    --output-samples {samples_out} \\
+    --output-html {html_out}
 """)
 
     return [relate_j, check_j]
@@ -74,7 +84,6 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
-    ped_content: str,
     outputs: dict[str, Path],
     out_html_url: str,
     dataset_name: str,
@@ -83,13 +92,12 @@ def pedigree_check_jobs(
 ) -> list[BashJob]:
     """
     Run somalier relate across all SGs in the dataset with a PED file,
-    then validate pedigree and alert via Slack.
+    then validate pedigree, alert via Slack, and register results in metamist.
 
     Returns [relate_job, check_job].
     """
     batch_instance = hail_batch.get_batch()
 
-    # Write PED content to a temporary file for the batch
     ped_path = outputs['expected_ped']
 
     # Job 1: somalier relate with --ped --infer
@@ -123,8 +131,10 @@ mv results.html {relate_j.output_html}
     batch_instance.write_output(relate_j.output_samples, str(outputs['samples']))
     batch_instance.write_output(relate_j.output_html, str(outputs['html']))
 
-    # Job 2: check pedigree + Slack alert
+    # Job 2: check pedigree + Slack alert + register in metamist
+    sg_ids_str = ','.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'
+
     check_j = batch_instance.new_bash_job(title, job_attrs)
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
@@ -139,7 +149,11 @@ python3 -m rd_qc.scripts.check_pedigree \\
     --ped {ped_input} \\
     --html-url {out_html_url} \\
     --dataset {dataset_name} \\
-    --title "{title}"
+    --title "{title}" \\
+    --sg-ids {sg_ids_str} \\
+    --output-pairs {str(outputs['pairs'])} \\
+    --output-samples {str(outputs['samples'])} \\
+    --output-html {str(outputs['html'])}
 touch {check_j.output}
 """
     check_j.command(cmd)

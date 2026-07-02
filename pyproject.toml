@@ -35,7 +35,7 @@ test = [
 ]
 
 [project.scripts]
-run_workflow = 'rd_qc.stages:cli_main'
+run_workflow = 'rd_qc.run_workflow:cli_main'
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rd_qc"]

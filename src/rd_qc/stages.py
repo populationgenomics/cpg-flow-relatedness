@@ -1,6 +1,5 @@
 """This file exists to define all the Stages for the workflow."""
 
-from argparse import ArgumentParser
 from itertools import combinations
 
 from cpg_flow import stage, targets, workflow, utils as flow_utils
@@ -105,12 +104,3 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
                     # invoke the method which takes two somalier files, runs _relate_, creates output, and registers
                     ...
 
-
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('--dry_run', action='store_true', help='Dry run')
-    args = parser.parse_args()
-
-    stages = [GenerateMissingSomalierFingerprints, RunCrossTypeIdentityChecks]
-
-    workflow.run_workflow(name='rd_qc', stages=stages, dry_run=args.dry_run)
