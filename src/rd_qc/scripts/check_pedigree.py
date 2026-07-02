@@ -208,6 +208,29 @@ def run(
     if config.config_retrieve(['workflow', 'somalier_pedigree', 'send_to_slack'], default=True):
         slack.send_message(text)
 
+    analysis_api = AnalysisApi()
+    for sg_id in sg_ids:
+        sg_meta = {
+            'check': 'pedigree',
+            'sex_match': sg_id not in sex_mismatch_ids,
+            'relatedness_issues': [issue for issue in all_issues if sg_id in issue],
+        }
+        analysis_api.create_analysis(
+            project=dataset,
+            analysis=Analysis(
+                type='somalier_relate',
+                status=AnalysisStatus('completed'),
+                sequencing_group_ids=[sg_id],
+                outputs={
+                    'pairs': output_pairs,
+                    'samples': output_samples,
+                    'html': output_html,
+                },
+                meta=sg_meta,
+            ),
+        )
+    logger.info(f'Registered somalier_relate analyses for {len(sg_ids)} SGs')
+
 
 def print_contents(
     samples_df,
@@ -234,28 +257,7 @@ def print_contents(
             ]
         ].to_string()
         logger.info(f'Somalier results, sample pairs (based on {somalier_pairs_fpath}):\n{pairs_str}\n')
-analysis_api = AnalysisApi()
-for sg_id in sg_ids:
-    sg_meta = {
-        'check': 'pedigree',
-        'sex_match': sg_id not in sex_mismatch_ids,
-        'relatedness_issues': [issue for issue in all_issues if sg_id in issue],
-    }
-    analysis_api.create_analysis(
-        project=dataset,
-        analysis=Analysis(
-            type='somalier_relate',
-            status=AnalysisStatus('completed'),
-            sequencing_group_ids=[sg_id],
-            outputs={
-                'pairs': output_pairs,
-                'samples': output_samples,
-                'html': output_html,
-            },
-            meta=sg_meta,
-        ),
-    )
-logger.info(f'Registered somalier_relate analyses for {len(sg_ids)} SGs')
+
 
 if __name__ == '__main__':
     parser = ArgumentParser()
