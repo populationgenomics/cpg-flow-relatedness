@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name='cpg_flow_rd_qc'
-description='Template workflow'
+description='Somalier Checks and eventually other QC checks for CPG-Flow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
 requires-python = ">=3.10,<3.12"
@@ -35,10 +35,10 @@ test = [
 ]
 
 [project.scripts]
-run_workflow = 'workflow_name.stages:cli_main'
+run_workflow = 'rd_qc.run_workflow:cli_main'
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/workflow_name"]
+packages = ["src/rd_qc"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""
@@ -47,7 +47,7 @@ packages = ["src/workflow_name"]
 include_package_data = true
 
 [options.package_data]
-'workflow_name'=  ['config_template.toml']
+'rd_qc'=  ['config_template.toml']
 
 [tool.mypy]
 ignore_missing_imports = true
