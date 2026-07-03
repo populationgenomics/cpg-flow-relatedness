@@ -5,7 +5,7 @@ Runs somalier extract on each input file and registers the result in metamist.
 
 from google.api_core.exceptions import NotFound
 from google.cloud import storage as gcs
-from hailtop.batch.job import BashJob
+from hailtop.batch.job import Job
 
 from rd_qc.utils import get_gcs_object_size
 
@@ -24,7 +24,7 @@ def somalier_jobs(
     somalier_targets: dict[str, str],
     somalier_outputs: dict[str, Path],
     project: str,
-) -> list[BashJob]:
+) -> list[Job]:
     """
     For each SG needing a fingerprint, run somalier extract and register the result.
 
@@ -75,7 +75,7 @@ def somalier_jobs(
             f'Register somalier {sg_id}',
             attributes={'tool': 'metamist'},
         )
-        registration_job.image(config.config_retrieve(['images', 'somalier']))
+        registration_job.image(config.config_retrieve(['workflow', 'driver_image']))
         registration_job.call(
             register_analyses,
             output=str(output_path),
@@ -88,5 +88,6 @@ def somalier_jobs(
         registration_job.depends_on(j)
 
         jobs.append(j)
+        jobs.append(registration_job)
 
     return jobs
