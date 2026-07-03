@@ -8,8 +8,9 @@ Always exits 0.
 import csv
 from argparse import ArgumentParser
 
-from cpg_utils import config, slack
 from loguru import logger
+
+from cpg_utils import config, slack
 from metamist.apis import AnalysisApi
 from metamist.models import Analysis, AnalysisStatus
 

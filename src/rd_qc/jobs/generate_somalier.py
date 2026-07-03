@@ -3,15 +3,17 @@ Job to generate somalier fingerprints for SGs missing them.
 Runs somalier extract on each input file and registers the result in metamist.
 """
 
+from google.api_core.exceptions import NotFound
+from google.cloud import storage as gcs
+from hailtop.batch.job import BashJob
+
+from rd_qc.utils import get_gcs_object_size
 
 from cpg_flow.status import complete_analysis_job
 from cpg_utils import Path, config, hail_batch
-from hailtop.batch.job import BashJob
-from rd_qc.utils import get_gcs_object_size
-from google.cloud import storage as gcs
-from google.api_core.exceptions import NotFound
 
 gcs_client = gcs.Client()
+
 
 def somalier_jobs(
     somalier_targets: dict[str, str],
@@ -77,4 +79,3 @@ def somalier_jobs(
         jobs.append(j)
 
     return jobs
-

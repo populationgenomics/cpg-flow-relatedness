@@ -1,8 +1,5 @@
 """Stages for the rd_qc somalier QC workflow."""
 
-from cpg_flow import stage, targets
-from cpg_utils import config, to_path, Path
-
 from rd_qc.jobs import generate_somalier, relate
 from rd_qc.utils import (
     build_ped_content,
@@ -12,10 +9,12 @@ from rd_qc.utils import (
     sg_ids_tag,
 )
 
+from cpg_flow import stage, targets
+from cpg_utils import Path, config, to_path
+
 
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
-
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
         missing_sgids = find_sgids_without_somalier(index)
@@ -54,7 +53,6 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
 
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class RunCrossTypeIdentityChecks(stage.DatasetStage):
-
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
         output_prefix = to_path(config.config_retrieve(['storage', dataset.name, 'default'])) / 'identity_checks'
@@ -114,7 +112,6 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class SomalierPedigreeCheck(stage.DatasetStage):
-
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         prefix = to_path(config.config_retrieve(['storage', dataset.name, 'default'])) / 'somalier_checks' / 'pedigree'
         web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'

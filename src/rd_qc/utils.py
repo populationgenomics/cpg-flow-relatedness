@@ -5,11 +5,12 @@ suggested location for any utility methods or constants used across multiple sta
 from dataclasses import dataclass
 from functools import cache
 
-from cpg_utils.config import config_retrieve
-from loguru import logger
-from metamist.graphql import gql, query
 from google.cloud import storage as gcs
-from google.api_core.exceptions import NotFound
+from loguru import logger
+
+from cpg_utils.config import config_retrieve
+from metamist.graphql import gql, query
+
 
 def get_gcs_object_size(fullpath: str, client: gcs.Client, buffer: int = 0) -> int:
     """
@@ -21,6 +22,7 @@ def get_gcs_object_size(fullpath: str, client: gcs.Client, buffer: int = 0) -> i
     blob.reload()
     size = blob.size // (1024**3)
     return size + buffer
+
 
 SG_QUERY = gql("""
     query ProjectSomalier($project: String!) {
@@ -64,12 +66,15 @@ PEDIGREE_QUERY = gql("""
     }
 """)
 
+
 @dataclass
 class SgSomalierInfo:
     """Somalier fingerprint state for a single sequencing group."""
+
     sg_id: str
     participant_id: str
     somalier_path: str | None
+
 
 class SomalierIndex:
     """Dual-indexed view of somalier data: O(1) lookup by participant or sg_id."""
@@ -81,10 +86,12 @@ class SomalierIndex:
             self.by_participant.setdefault(info.participant_id, []).append(info)
             self.by_sg[info.sg_id] = info
 
+
 def _resolve_project(project: str) -> str:
     if config_retrieve(['workflow', 'access_level']) == 'test' and not project.endswith('-test'):
         return project + '-test'
     return project
+
 
 @cache
 def _query_project_sgs(project: str) -> list[dict]:
@@ -92,6 +99,7 @@ def _query_project_sgs(project: str) -> list[dict]:
     resolved = _resolve_project(project)
     response = query(SG_QUERY, variables={'project': resolved})
     return response['project']['sequencingGroups']
+
 
 def get_project_sgs_and_fingerprints(project: str) -> SomalierIndex:
     """
@@ -150,6 +158,7 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
         if buckets.get(file_type):
             return buckets[file_type][0]
     return None
+
 
 @cache
 def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> dict[str, str]:

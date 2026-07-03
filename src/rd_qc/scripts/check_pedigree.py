@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 This script parses "somalier relate" (https://github.com/brentp/somalier) outputs,
 and returns a report whether sex and pedigree matches the provided PED file.
@@ -15,11 +13,12 @@ import contextlib
 from argparse import ArgumentParser
 
 import pandas as pd
-from cpg_utils import config, slack, to_path
 from loguru import logger
+from peddy import Ped
+
+from cpg_utils import config, slack, to_path
 from metamist.apis import AnalysisApi
 from metamist.models import Analysis, AnalysisStatus
-from peddy import Ped
 
 _messages: list[str] = []
 
@@ -39,37 +38,7 @@ def error(msg):
     logger.error(msg)
 
 
-def run(
-    somalier_samples_fpath: str,
-    somalier_pairs_fpath: str,
-    expected_ped_fpath: str,
-    title: str,
-    sg_ids: list[str],
-    output_pairs: str,
-    output_samples: str,
-    output_html: str,
-    html_url: str | None = None,
-    dataset: str | None = None,
-):
-    """Report pedigree inconsistencies, given somalier outputs."""
-    logger.info(somalier_samples_fpath)
-    samples_df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
-    pairs_df = pd.read_csv(somalier_pairs_fpath, delimiter='\t')
-    with to_path(somalier_samples_fpath).open() as f:
-        inferred_ped = Ped(f)
-    with to_path(expected_ped_fpath).open() as f:
-        expected_ped = Ped(f)
-
-    bad = samples_df.gt_depth_mean == 0.0
-    if bad.any():
-        warning(
-            f'⚠️ Excluded {len(samples_df[bad])}/{len(samples_df)} samples with zero '
-            f'mean GT depth from pedigree/sex checks: {", ".join(samples_df[bad].sample_id)}',
-        )
-        info('')
-    bad_ids = list(samples_df[bad].sample_id)  # for checking in pairs_df
-    samples_df = samples_df[~bad]
-
+def _check_sex(samples_df) -> set[str]:
     info('*Inferred vs. reported sex:*')
     samples_df.sex = samples_df.sex.apply(lambda x: {1: 'male', 2: 'female'}.get(x, 'unknown'))
     samples_df.original_pedigree_sex = samples_df.original_pedigree_sex.apply(lambda x: {'-9': 'unknown'}.get(x, x))
@@ -111,6 +80,15 @@ def run(
     )
     info('')
 
+    return sex_mismatch_ids
+
+
+def _check_relatedness(
+    pairs_df,
+    expected_ped: Ped,
+    inferred_ped: Ped,
+    bad_ids: list,
+) -> tuple[list[str], list[str]]:
     info('*Relatedness:*')
     expected_ped_sample_by_id = {s.sample_id: s for s in expected_ped.samples()}
     inferred_ped_sample_by_id = {s.sample_id: s for s in inferred_ped.samples()}
@@ -187,6 +165,45 @@ def run(
         info('✅ Inferred pedigree matches for all provided related pairs.')
     info('')
 
+    return mismatching_unrelated_to_related, mismatching_related_to_unrelated
+
+
+def run(
+    somalier_samples_fpath: str,
+    somalier_pairs_fpath: str,
+    expected_ped_fpath: str,
+    title: str,
+    sg_ids: list[str],
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
+    html_url: str | None = None,
+    dataset: str | None = None,
+):
+    """Report pedigree inconsistencies, given somalier outputs."""
+    logger.info(somalier_samples_fpath)
+    samples_df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
+    pairs_df = pd.read_csv(somalier_pairs_fpath, delimiter='\t')
+    with to_path(somalier_samples_fpath).open() as f:
+        inferred_ped = Ped(f)
+    with to_path(expected_ped_fpath).open() as f:
+        expected_ped = Ped(f)
+
+    bad = samples_df.gt_depth_mean == 0.0
+    if bad.any():
+        warning(
+            f'⚠️ Excluded {len(samples_df[bad])}/{len(samples_df)} samples with zero '
+            f'mean GT depth from pedigree/sex checks: {", ".join(samples_df[bad].sample_id)}',
+        )
+        info('')
+    bad_ids = list(samples_df[bad].sample_id)  # for checking in pairs_df
+    samples_df = samples_df[~bad]
+
+    sex_mismatch_ids = _check_sex(samples_df)
+    mismatching_unrelated_to_related, mismatching_related_to_unrelated = _check_relatedness(
+        pairs_df, expected_ped, inferred_ped, bad_ids,
+    )
+
     print_contents(
         samples_df,
         pairs_df,
@@ -194,7 +211,6 @@ def run(
         somalier_pairs_fpath,
     )
 
-    # Constructing Slack message
     if dataset and html_url:
         title = f'*[{dataset}]* <{html_url}|{title or "Somalier pedigree report"}>'
     elif not title:
@@ -291,7 +307,3 @@ if __name__ == '__main__':
         output_samples=args.output_samples,
         output_html=args.output_html,
     )
-
-
-
-

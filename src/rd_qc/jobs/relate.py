@@ -2,8 +2,9 @@
 Jobs for somalier relate — used by both identity checks and pedigree checks.
 """
 
-from cpg_utils import Path, config, hail_batch
 from hailtop.batch.job import BashJob
+
+from cpg_utils import Path, config, hail_batch
 
 
 def identity_check_jobs(
@@ -139,9 +140,9 @@ python3 -m rd_qc.scripts.check_pedigree \\
     --dataset {dataset_name} \\
     --title "{title}" \\
     --sg-ids {sg_ids_str} \\
-    --output-pairs {str(outputs['pairs'])} \\
-    --output-samples {str(outputs['samples'])} \\
-    --output-html {str(outputs['html'])}
+    --output-pairs {outputs['pairs']!s} \\
+    --output-samples {outputs['samples']!s} \\
+    --output-html {outputs['html']!s}
 touch {check_j.output}
 """
     check_j.command(cmd)
