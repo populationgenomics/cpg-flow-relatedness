@@ -47,7 +47,7 @@ def somalier_jobs(
         )
         j.image(config.config_retrieve(['images', 'somalier']))
         try:
-            storage_gb = get_gcs_object_size(source_file, gcs_client, buffer=5)
+            storage_gb = get_gcs_object_size(source_file, gcs_client, buffer=10)
         except NotFound:
             storage_gb = 50
         j.storage(f'{storage_gb}Gi')
