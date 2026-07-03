@@ -17,31 +17,24 @@ from argparse import ArgumentParser
 import pandas as pd
 from cpg_utils import config, slack, to_path
 from loguru import logger
+from metamist.apis import AnalysisApi
+from metamist.models import Analysis, AnalysisStatus
 from peddy import Ped
 
 _messages: list[str] = []
 
 
 def info(msg):
-    """
-    Record and forward.
-    """
     _messages.append(msg)
     logger.info(msg)
 
 
 def warning(msg):
-    """
-    Record and forward.
-    """
     _messages.append(msg)
     logger.warning(msg)
 
 
 def error(msg):
-    """
-    Record and forward.
-    """
     _messages.append(msg)
     logger.error(msg)
 
@@ -51,6 +44,10 @@ def run(
     somalier_pairs_fpath: str,
     expected_ped_fpath: str,
     title: str,
+    sg_ids: list[str],
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
     html_url: str | None = None,
     dataset: str | None = None,
 ):
@@ -74,7 +71,6 @@ def run(
     samples_df = samples_df[~bad]
 
     info('*Inferred vs. reported sex:*')
-    # Rename Ped sex to human-readable tags
     samples_df.sex = samples_df.sex.apply(lambda x: {1: 'male', 2: 'female'}.get(x, 'unknown'))
     samples_df.original_pedigree_sex = samples_df.original_pedigree_sex.apply(lambda x: {'-9': 'unknown'}.get(x, x))
     missing_inferred_sex = samples_df.sex == 'unknown'
@@ -86,6 +82,8 @@ def run(
         (samples_df.sex != samples_df.original_pedigree_sex) & (~mismatching_female) & (~mismatching_male)
     )
     matching_sex = ~mismatching_sex & ~mismatching_other
+
+    sex_mismatch_ids = set(samples_df[mismatching_sex].sample_id)
 
     def _print_stats(df_filter) -> None:
         for _, row_ in samples_df[df_filter].iterrows():
@@ -130,7 +128,6 @@ def run(
         expected_ped_s2 = expected_ped_sample_by_id.get(s2)
         inferred_ped_s1 = inferred_ped_sample_by_id.get(s1)
         inferred_ped_s2 = inferred_ped_sample_by_id.get(s2)
-        # Suppressing all logging output from peddy, otherwise it would clutter the logs
         with contextlib.redirect_stderr(None), contextlib.redirect_stdout(None):
             if expected_ped_s1 and expected_ped_s2:
                 expected_rel = expected_ped.relation(expected_ped_s1, expected_ped_s2)
@@ -142,7 +139,6 @@ def run(
                 inferred_rel = 'unknown'
 
         if inferred_rel != expected_rel:
-            # Constructing a line for a report:
             line = ''
             if (fam1 := expected_ped_s1.family_id if expected_ped_s1 else None) == (
                 fam2 := expected_ped_s2.family_id if expected_ped_s2 else None
@@ -208,6 +204,8 @@ def run(
     if config.config_retrieve(['workflow', 'somalier_pedigree', 'send_to_slack'], default=True):
         slack.send_message(text)
 
+    all_issues = mismatching_unrelated_to_related + mismatching_related_to_unrelated
+
     analysis_api = AnalysisApi()
     for sg_id in sg_ids:
         sg_meta = {
@@ -238,9 +236,6 @@ def print_contents(
     somalier_samples_fpath,
     somalier_pairs_fpath,
 ):
-    """
-    Print useful information to manually review pedigree check results
-    """
     if len(samples_df) < 400:  # noqa: PLR2004
         samples_str = samples_df.to_string()
         logger.info(f'Somalier results, samples (based on {somalier_samples_fpath}):\n{samples_str}\n')
@@ -279,6 +274,10 @@ if __name__ == '__main__':
     parser.add_argument('--title', required=True, help='Report title')
     parser.add_argument('--html-url', help='Somalier HTML URL')
     parser.add_argument('--dataset', help='Dataset name')
+    parser.add_argument('--sg-ids', required=True, help='Comma-separated SG IDs')
+    parser.add_argument('--output-pairs', required=True)
+    parser.add_argument('--output-samples', required=True)
+    parser.add_argument('--output-html', required=True)
     args = parser.parse_args()
     run(
         somalier_samples_fpath=args.somalier_samples,
@@ -287,6 +286,10 @@ if __name__ == '__main__':
         html_url=args.html_url,
         dataset=args.dataset,
         title=args.title,
+        sg_ids=args.sg_ids.split(','),
+        output_pairs=args.output_pairs,
+        output_samples=args.output_samples,
+        output_html=args.output_html,
     )
 
 
