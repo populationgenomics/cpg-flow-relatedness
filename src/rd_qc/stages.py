@@ -12,6 +12,8 @@ from rd_qc.utils import (
 from cpg_flow import stage, targets
 from cpg_utils import Path, config, to_path
 
+_MIN_SGS_FOR_IDENTITY_CHECK = 2
+
 
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
@@ -29,7 +31,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
 
         return {sg_id: to_path(f'{source_file}.somalier') for sg_id, source_file in extract_targets.items()}
 
-    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
         outputs = self.expected_outputs(dataset)
 
         if not outputs:
@@ -59,7 +61,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
         outputs = {}
         for participant_id, sg_list in index.by_participant.items():
-            if len(sg_list) < 2:
+            if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
             tag = sg_ids_tag([info.sg_id for info in sg_list])
@@ -88,11 +90,11 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
         all_jobs = []
         for participant_id, sg_list in index.by_participant.items():
-            if len(sg_list) < 2:
+            if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
             somalier_paths = {info.sg_id: info.somalier_path for info in sg_list if info.somalier_path is not None}
-            if len(somalier_paths) < 2:
+            if len(somalier_paths) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
             tag = sg_ids_tag([info.sg_id for info in sg_list])

@@ -240,9 +240,9 @@ def build_ped_content(
         sex = row.get('sex', 0)
         affected = row.get('affected', -9)
 
-        sg_ids = participant_to_sgs.get(individual_id)
-        if sg_ids:
-            for sg_id in sorted(sg_ids):
+        sg_id_list = participant_to_sgs.get(individual_id)
+        if sg_id_list:
+            for sg_id in sorted(sg_id_list):
                 lines.append(f'{family_id}\t{sg_id}\t{paternal_id}\t{maternal_id}\t{sex}\t{affected}')
         else:
             lines.append(f'{family_id}\t{individual_id}\t{paternal_id}\t{maternal_id}\t{sex}\t{affected}')

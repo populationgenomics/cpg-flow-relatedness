@@ -38,6 +38,25 @@ def error(msg):
     logger.error(msg)
 
 
+def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row) -> str:
+    fam1 = expected_ped_s1.family_id if expected_ped_s1 else None
+    fam2 = expected_ped_s2.family_id if expected_ped_s2 else None
+    if fam1 == fam2:
+        line = f'{fam1}: {s1} - {s2}'
+    else:
+        line = s1 + (f' ({fam1})' if fam1 and fam1 != s1 else '')
+        line += ' - '
+        line += s2 + (f' ({fam2})' if fam2 and fam2 != s2 else '')
+    return (
+        f'{line}, '
+        f'provided: "{expected_rel}", '
+        f'inferred: "{inferred_rel}", '
+        f'kin={row["relatedness"]}, '
+        f'ibs0={row["ibs0"]}, '
+        f'ibs2={row["ibs2"]}'
+    )
+
+
 def _check_sex(samples_df) -> set[str]:
     info('*Inferred vs. reported sex:*')
     samples_df.sex = samples_df.sex.apply(lambda x: {1: 'male', 2: 'female'}.get(x, 'unknown'))
@@ -83,6 +102,30 @@ def _check_sex(samples_df) -> set[str]:
     return sex_mismatch_ids
 
 
+def _report_relatedness_findings(
+    unrelated_to_related: list[str],
+    related_to_unrelated: list[str],
+) -> None:
+    if unrelated_to_related:
+        info(
+            f'⚠️ Found {len(unrelated_to_related)} '
+            f'sample pair(s) that are provided as unrelated, are inferred as '
+            f'related:',
+        )
+        for i, pair in enumerate(unrelated_to_related):
+            info(f' {i + 1}. {pair}')
+    if related_to_unrelated:
+        info(
+            f'❗ Found {len(related_to_unrelated)} sample pair(s) '
+            f'that are provided as related, but inferred as unrelated:',
+        )
+        for i, pair in enumerate(related_to_unrelated):
+            info(f' {i + 1}. {pair}')
+    if not unrelated_to_related and not related_to_unrelated:
+        info('✅ Inferred pedigree matches for all provided related pairs.')
+    info('')
+
+
 def _check_relatedness(
     pairs_df,
     expected_ped: Ped,
@@ -117,23 +160,7 @@ def _check_relatedness(
                 inferred_rel = 'unknown'
 
         if inferred_rel != expected_rel:
-            line = ''
-            if (fam1 := expected_ped_s1.family_id if expected_ped_s1 else None) == (
-                fam2 := expected_ped_s2.family_id if expected_ped_s2 else None
-            ):
-                line += f'{fam1}: {s1} - {s2}'
-            else:
-                line += s1 + (f' ({fam1})' if fam1 and fam1 != s1 else '')
-                line += ' - '
-                line += s2 + (f' ({fam2})' if fam2 and fam2 != s2 else '')
-            line = (
-                f'{line}, '
-                f'provided: "{expected_rel}", '
-                f'inferred: "{inferred_rel}", '
-                f'kin={row["relatedness"]}, '
-                f'ibs0={row["ibs0"]}, '
-                f'ibs2={row["ibs2"]}'
-            )
+            line = _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row)
 
             if (expected_rel == 'unknown' and inferred_rel != 'unknown') or (
                 expected_rel == 'unrelated' and inferred_rel != 'unrelated'
@@ -146,24 +173,7 @@ def _check_relatedness(
         pairs_df.loc[idx, 'provided_rel'] = expected_rel
         pairs_df.loc[idx, 'inferred_rel'] = inferred_rel
 
-    if mismatching_unrelated_to_related:
-        info(
-            f'⚠️ Found {len(mismatching_unrelated_to_related)} '
-            f'sample pair(s) that are provided as unrelated, are inferred as '
-            f'related:',
-        )
-        for i, pair in enumerate(mismatching_unrelated_to_related):
-            info(f' {i + 1}. {pair}')
-    if mismatching_related_to_unrelated:
-        info(
-            f'❗ Found {len(mismatching_related_to_unrelated)} sample pair(s) '
-            f'that are provided as related, but inferred as unrelated:',
-        )
-        for i, pair in enumerate(mismatching_related_to_unrelated):
-            info(f' {i + 1}. {pair}')
-    if not mismatching_unrelated_to_related and not mismatching_related_to_unrelated:
-        info('✅ Inferred pedigree matches for all provided related pairs.')
-    info('')
+    _report_relatedness_findings(mismatching_unrelated_to_related, mismatching_related_to_unrelated)
 
     return mismatching_unrelated_to_related, mismatching_related_to_unrelated
 
@@ -201,7 +211,10 @@ def run(
 
     sex_mismatch_ids = _check_sex(samples_df)
     mismatching_unrelated_to_related, mismatching_related_to_unrelated = _check_relatedness(
-        pairs_df, expected_ped, inferred_ped, bad_ids,
+        pairs_df,
+        expected_ped,
+        inferred_ped,
+        bad_ids,
     )
 
     print_contents(
