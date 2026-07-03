@@ -1,8 +1,6 @@
 """Stages for the rd_qc somalier QC workflow."""
 
-from argparse import ArgumentParser
-
-from cpg_flow import stage, targets, workflow
+from cpg_flow import stage, targets
 from cpg_utils import config, to_path, Path
 
 from rd_qc.jobs import generate_somalier, relate
