@@ -36,8 +36,8 @@ jobs:
         name: 'Authenticate to Google Cloud'
         uses: 'google-github-actions/auth@v2'
         with:
-          workload_identity_provider: ${{ secrets.PROD_IMG_DEPLOYER_POOL}}
-          service_account: ${{ secrets.PROD_IMG_DEPLOYER_SA }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER}}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - id: 'google-cloud-sdk-setup'
         name: 'Set up Cloud SDK'
@@ -69,8 +69,8 @@ jobs:
         name: 'Authenticate to Google Cloud'
         uses: 'google-github-actions/auth@v2'
         with:
-          workload_identity_provider: ${{ secrets.PROD_IMG_DEPLOYER_POOL}}
-          service_account: ${{ secrets.PROD_IMG_DEPLOYER_SA }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER}}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - id: 'google-cloud-sdk-setup'
         name: 'Set up Cloud SDK'
@@ -82,7 +82,7 @@ jobs:
         run: |
           docker build . -f Dockerfile \
           --build-arg VERSION=${{ needs.get_next_version.outputs.next_version }} \
-          --tag ${{ env.IMAGES_PREFIX }}/cpg-flow-example:${{ needs.get_next_version.outputs.next_version }}
+          --tag ${{ env.IMAGES_PREFIX }}/cpg-flow-relatedness:${{ needs.get_next_version.outputs.next_version }}
       - name: 'push image'
         run: |
-          docker push "${{ env.IMAGES_PREFIX }}/cpg-flow-example:${{ needs.get_next_version.outputs.next_version }}"
+          docker push "${{ env.IMAGES_PREFIX }}/cpg-flow-relatedness:${{ needs.get_next_version.outputs.next_version }}"
