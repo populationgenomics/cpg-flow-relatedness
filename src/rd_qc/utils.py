@@ -33,7 +33,7 @@ SG_QUERY = gql("""
                     }
                 }
                 analyses(type: {eq: "somalier"}) {
-                    output
+                    outputs
                     meta
                 }
             }
@@ -47,7 +47,7 @@ ANALYSIS_QUERY = gql("""
             sequencingGroups(id: {in_: $sgIds}) {
                 id
                 analyses(type: {in_: ["cram", "gvcf", "vcf"]}) {
-                    output
+                    outputs
                     type
                     meta
                 }
@@ -108,7 +108,7 @@ def get_project_sgs_and_fingerprints(project: str) -> SomalierIndex:
         sg_id = sg['id']
         participant_id = sg['sample']['participant']['externalId']
         analyses = sg.get('analyses', [])
-        somalier_path = analyses[0]['output'] if analyses else None
+        somalier_path = analyses[0]['outputs'].get('path') if analyses else None
         entries.append(SgSomalierInfo(sg_id=sg_id, participant_id=participant_id, somalier_path=somalier_path))
 
     return SomalierIndex(entries)
@@ -132,7 +132,7 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
     buckets: dict[str, list[str]] = {'cram': [], 'gvcf': [], 'vcf': []}
 
     for analysis in analyses:
-        output = analysis.get('output', '')
+        output = (analysis.get('outputs') or {}).get('path', '')
         if not output:
             continue
         if analysis.get('meta', {}).get('joint_called', False):
