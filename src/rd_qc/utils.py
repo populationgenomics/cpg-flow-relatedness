@@ -8,7 +8,19 @@ from functools import cache
 from cpg_utils.config import config_retrieve
 from loguru import logger
 from metamist.graphql import gql, query
+from google.cloud import storage as gcs
+from google.api_core.exceptions import NotFound
 
+def get_gcs_object_size(fullpath: str, client: gcs.Client, buffer: int = 0) -> int:
+    """
+    Get exact object size in GCS in GB, plus optional buffer for intermediate files.
+    Returns 0 + buffer if the object is under 1GB.
+    """
+    bucket_name, filepath = fullpath.removeprefix('gs://').split('/', 1)
+    blob = client.bucket(bucket_name).blob(filepath)
+    blob.reload()
+    size = blob.size // (1024**3)
+    return size + buffer
 
 SG_QUERY = gql("""
     query ProjectSomalier($project: String!) {
