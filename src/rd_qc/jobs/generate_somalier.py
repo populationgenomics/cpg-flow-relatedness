@@ -12,6 +12,10 @@ from rd_qc.utils import get_gcs_object_size
 from cpg_flow.status import complete_analysis_job
 from cpg_utils import Path, config, hail_batch
 
+
+def register_analyses(output, analysis_type, cohort_ids, sg_ids, project_name, meta):
+    complete_analysis_job(output, analysis_type, cohort_ids, sg_ids, project_name, meta)
+
 gcs_client = gcs.Client()
 
 
@@ -66,15 +70,21 @@ def somalier_jobs(
 
         batch_instance.write_output(j.output_file, str(output_path))
 
-        complete_analysis_job(
-            batch=batch_instance,
-            output=str(output_path),
-            sequencing_group_ids=[sg_id],
-            analysis_type='somalier',
-            meta={},
-            depends_on=j,
-            project_name=project,
+        registration_job = batch_instance.new_python_job(
+            f'Register somalier {sg_id}',
+            attributes={'tool': 'metamist'},
         )
+        registration_job.image(config.config_retrieve(['images', 'somalier']))
+        registration_job.call(
+            register_analyses,
+            output=str(output_path),
+            analysis_type='somalier',
+            cohort_ids=[],
+            sg_ids=[sg_id],
+            project_name=project,
+            meta={},
+        )
+        registration_job.depends_on(j)
 
         jobs.append(j)
 
