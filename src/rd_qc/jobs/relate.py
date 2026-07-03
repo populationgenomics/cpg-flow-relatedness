@@ -30,28 +30,25 @@ def identity_check_jobs(
     storage_gb = 1 + len(somalier_paths) // 4000
     relate_j.storage(f'{storage_gb}Gi')
 
-    cmd = 'mkdir -p inputs/\n'
+    relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
         somalier_file = batch_instance.read_input(str(somalier_path))
-        cmd += f'cp {somalier_file} inputs/{sg_id}.somalier\n'
+        relate_j.command(f'mv {somalier_file} inputs/{sg_id}.somalier')
 
-    cmd += f"""\
-somalier relate -o results inputs/*.somalier
-mv results.pairs.tsv {relate_j.pairs_tsv}
-mv results.samples.tsv {relate_j.samples_tsv}
-mv results.html {relate_j.html}
-"""
-    relate_j.command(cmd)
+    relate_j.declare_resource_group(
+        output={
+            'pairs.tsv': '{root}.pairs.tsv',
+            'samples.tsv': '{root}.samples.tsv',
+            'html': '{root}.html',
+        }
+    )
+    relate_j.command(f'somalier relate -o {relate_j.output} inputs/*.somalier')
+    batch_instance.write_output(relate_j.output, output_prefix)
 
     pairs_out = str(output_prefix) + '.pairs.tsv'
     samples_out = str(output_prefix) + '.samples.tsv'
     html_out = str(output_prefix) + '.html'
 
-    batch_instance.write_output(relate_j.pairs_tsv, pairs_out)
-    batch_instance.write_output(relate_j.samples_tsv, samples_out)
-    batch_instance.write_output(relate_j.html, html_out)
-
-    # Job 2: check self-relatedness + Slack alert + register in metamist
     kinship_threshold = config.config_retrieve(
         ['workflow', 'somalier_self_check', 'kinship_threshold'],
         0.9,
@@ -65,11 +62,9 @@ mv results.html {relate_j.html}
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    hail_batch.copy_common_env(check_j)
-    hail_batch.authenticate_cloud_credentials_in_job(check_j)
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
-    --pairs-tsv {relate_j.pairs_tsv} \\
+    --pairs-tsv {relate_j.output['pairs.tsv']} \\
     --participant-id {participant_id} \\
     --dataset {dataset_name} \\
     --kinship-threshold {kinship_threshold} \\
@@ -109,29 +104,25 @@ def pedigree_check_jobs(
     storage_gb = 1 + len(somalier_paths) // 4000
     relate_j.storage(f'{storage_gb}Gi')
 
-    cmd = 'mkdir -p inputs/\n'
+    relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
         somalier_file = batch_instance.read_input(str(somalier_path))
-        cmd += f'cp {somalier_file} inputs/{sg_id}.somalier\n'
+        relate_j.command(f'mv {somalier_file} inputs/{sg_id}.somalier')
 
     ped_input = batch_instance.read_input(str(ped_path))
-    cmd += f"""\
-somalier relate \\
-    --ped {ped_input} \\
-    -o results \\
-    --infer \\
-    inputs/*.somalier
-mv results.pairs.tsv {relate_j.output_pairs}
-mv results.samples.tsv {relate_j.output_samples}
-mv results.html {relate_j.output_html}
-"""
-    relate_j.command(cmd)
 
-    batch_instance.write_output(relate_j.output_pairs, str(outputs['pairs']))
-    batch_instance.write_output(relate_j.output_samples, str(outputs['samples']))
-    batch_instance.write_output(relate_j.output_html, str(outputs['html']))
+    relate_j.declare_resource_group(
+        output={
+            'pairs.tsv': '{root}.pairs.tsv',
+            'samples.tsv': '{root}.samples.tsv',
+            'html': '{root}.html',
+        }
+    )
+    relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
+    batch_instance.write_output(relate_j.output['pairs.tsv'], str(outputs['pairs']))
+    batch_instance.write_output(relate_j.output['samples.tsv'], str(outputs['samples']))
+    batch_instance.write_output(relate_j.output['html'], str(outputs['html']))
 
-    # Job 2: check pedigree + Slack alert + register in metamist
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'
 
@@ -139,13 +130,10 @@ mv results.html {relate_j.output_html}
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    hail_batch.copy_common_env(check_j)
-    hail_batch.authenticate_cloud_credentials_in_job(check_j)
-
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\
-    --somalier-samples {relate_j.output_samples} \\
-    --somalier-pairs {relate_j.output_pairs} \\
+    --somalier-samples {relate_j.output['samples.tsv']} \\
+    --somalier-pairs {relate_j.output['pairs.tsv']} \\
     --ped {ped_input} \\
     --html-url {out_html_url} \\
     --dataset {dataset_name} \\
