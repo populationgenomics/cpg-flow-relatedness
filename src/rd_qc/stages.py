@@ -10,7 +10,7 @@ from rd_qc.utils import (
 )
 
 from cpg_flow import stage, targets
-from cpg_utils import Path, config, to_path
+from cpg_utils import Path, to_path
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
@@ -57,7 +57,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
 class RunCrossTypeIdentityChecks(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
-        output_prefix = to_path(config.config_retrieve(['storage', dataset.name, 'default'])) / 'identity_checks'
+        output_prefix = dataset.prefix() / 'identity_checks'
 
         outputs = {}
         for participant_id, sg_list in index.by_participant.items():
@@ -86,7 +86,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             if sg_id in index.by_sg:
                 index.by_sg[sg_id].somalier_path = str(new_path)
 
-        output_prefix = to_path(config.config_retrieve(['storage', dataset.name, 'default'])) / 'identity_checks'
+        output_prefix = dataset.prefix() / 'identity_checks'
 
         all_jobs = []
         for participant_id, sg_list in index.by_participant.items():
@@ -115,14 +115,14 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class SomalierPedigreeCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
-        prefix = to_path(config.config_retrieve(['storage', dataset.name, 'default'])) / 'somalier_checks' / 'pedigree'
-        web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'
+        prefix = dataset.prefix() / 'somalier_checks' / 'pedigree'
 
+        output_prefix = prefix / dataset.name
         return {
-            'samples': prefix / f'{dataset.name}.samples.tsv',
-            'pairs': prefix / f'{dataset.name}.pairs.tsv',
+            'samples': to_path(f'{output_prefix}.samples.tsv'),
+            'pairs': to_path(f'{output_prefix}.pairs.tsv'),
             'expected_ped': prefix / f'{dataset.name}.expected.ped',
-            'html': web_prefix / 'somalier-pedigree.html',
+            'html': to_path(f'{output_prefix}.html'),
             'checks': prefix / f'{dataset.name}-checks.done',
         }
 
@@ -149,15 +149,13 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         with to_path(ped_path).open('w') as f:
             f.write(ped_content)
 
-        html_url = str(outputs['html']).replace(
-            str(dataset.web_prefix()),
-            dataset.web_url(),
-        )
+        output_prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / dataset.name
 
         jobs = relate.pedigree_check_jobs(
             somalier_paths=somalier_paths,
+            output_prefix=output_prefix,
             outputs=outputs,
-            out_html_url=html_url,
+            out_html_url=str(outputs['html']),
             dataset_name=dataset.name,
             label=f'{dataset.name} Somalier',
             job_attrs={},

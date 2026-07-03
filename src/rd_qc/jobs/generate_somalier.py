@@ -16,6 +16,7 @@ from cpg_utils import Path, config, hail_batch
 def register_analyses(output, analysis_type, cohort_ids, sg_ids, project_name, meta):
     complete_analysis_job(output, analysis_type, cohort_ids, sg_ids, project_name, meta)
 
+
 gcs_client = gcs.Client()
 
 

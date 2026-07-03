@@ -80,6 +80,7 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
+    output_prefix: Path,
     outputs: dict[str, Path],
     out_html_url: str,
     dataset_name: str,
@@ -120,9 +121,7 @@ def pedigree_check_jobs(
         }
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
-    batch_instance.write_output(relate_j.output['pairs.tsv'], str(outputs['pairs']))
-    batch_instance.write_output(relate_j.output['samples.tsv'], str(outputs['samples']))
-    batch_instance.write_output(relate_j.output['html'], str(outputs['html']))
+    batch_instance.write_output(relate_j.output, str(output_prefix))
 
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'
