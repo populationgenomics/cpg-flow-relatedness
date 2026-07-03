@@ -3,14 +3,15 @@ Job to generate somalier fingerprints for SGs missing them.
 Runs somalier extract on each input file and registers the result in metamist.
 """
 
-import re
 
 from cpg_flow.status import complete_analysis_job
 from cpg_utils import Path, config, hail_batch
 from hailtop.batch.job import BashJob
+from rd_qc.utils import get_gcs_object_size
+from google.cloud import storage as gcs
+from google.api_core.exceptions import NotFound
 
-_CRAM_PATTERN = re.compile(r'\.cram$')
-
+gcs_client = gcs.Client()
 
 def somalier_jobs(
     somalier_targets: dict[str, str],
@@ -38,21 +39,19 @@ def somalier_jobs(
             {'tool': 'somalier', 'sg': sg_id},
         )
         j.image(config.config_retrieve(['images', 'somalier']))
+        try:
+            storage_gb = get_gcs_object_size(source_file, gcs_client, buffer=5)
+        except NotFound:
+            storage_gb = 50
+        j.storage(f'{storage_gb}Gi')
 
-        #crams need more space
-        is_cram = bool(_CRAM_PATTERN.search(source_file))
+        is_cram = source_file.endswith('.cram')
         if is_cram:
-            storage_gb = config.config_retrieve(
-                ['workflow', 'resource_overrides', 'somalier_extract', 'storage_gib'],
-                50,
-            )
-            j.storage(f'{storage_gb}GB')
             localised = batch_instance.read_input_group(
                 cram=source_file,
                 crai=f'{source_file}.crai',
             ).cram
         else:
-            j.storage('10GB')
             localised = batch_instance.read_input_group(
                 **{'vcf.gz': source_file, 'vcf.gz.tbi': f'{source_file}.tbi'},
             )['vcf.gz']
