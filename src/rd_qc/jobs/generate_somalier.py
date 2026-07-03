@@ -76,13 +76,17 @@ def somalier_jobs(
             attributes={'tool': 'metamist'},
         )
         registration_job.image(config.config_retrieve(['workflow', 'driver_image']))
+        metamist_project = project
+        if config.config_retrieve(['workflow', 'access_level']) == 'test' and 'test' not in project:
+            metamist_project = f'{project}-test'
+
         registration_job.call(
             register_analyses,
             output=str(output_path),
             analysis_type='somalier',
             cohort_ids=[],
             sg_ids=[sg_id],
-            project_name=project,
+            project_name=metamist_project,
             meta={},
         )
         registration_job.depends_on(j)
