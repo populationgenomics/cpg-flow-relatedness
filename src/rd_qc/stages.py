@@ -53,7 +53,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
 
 
-@stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
+@stage.stage()
 class RunCrossTypeIdentityChecks(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
@@ -112,7 +112,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
         return self.make_outputs(dataset, data=outputs, jobs=all_jobs)
 
 
-@stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
+@stage.stage()
 class SomalierPedigreeCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         prefix = dataset.prefix() / 'somalier_checks' / 'pedigree'
