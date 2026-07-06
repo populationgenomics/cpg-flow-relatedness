@@ -72,7 +72,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
         return outputs
 
-    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa:ARG002
         outputs = self.expected_outputs(dataset)
 
         if not outputs:
@@ -125,7 +125,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'checks': prefix / f'{dataset.name}-checks.done',
         }
 
-    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
         outputs = self.expected_outputs(dataset)
 
         index = get_project_sgs_and_fingerprints(dataset.name)

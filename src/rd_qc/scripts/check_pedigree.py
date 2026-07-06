@@ -16,6 +16,8 @@ import pandas as pd
 from loguru import logger
 from peddy import Ped
 
+from rd_qc.utils import _resolve_project
+
 from cpg_utils import config, slack, to_path
 from metamist.apis import AnalysisApi
 from metamist.models import Analysis, AnalysisStatus
@@ -187,10 +189,13 @@ def run(
     output_pairs: str,
     output_samples: str,
     output_html: str,
-    html_url: str | None = None,
-    dataset: str | None = None,
+    html_url: str,
+    dataset: str,
 ):
     """Report pedigree inconsistencies, given somalier outputs."""
+
+    dataset = _resolve_project(dataset)
+
     logger.info(somalier_samples_fpath)
     samples_df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
     pairs_df = pd.read_csv(somalier_pairs_fpath, delimiter='\t')
