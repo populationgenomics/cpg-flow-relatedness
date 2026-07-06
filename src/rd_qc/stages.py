@@ -80,11 +80,11 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
         index = get_project_sgs_and_fingerprints(dataset.name)
 
-        # Patch in newly-generated fingerprints via O(1) sg_id lookup
-        new_fingerprints = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
-        for sg_id, new_path in new_fingerprints.items():
-            if sg_id in index.by_sg:
-                index.by_sg[sg_id].somalier_path = str(new_path)
+        if find_sgids_without_somalier(index):
+            new_fingerprints = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
+            for sg_id, new_path in new_fingerprints.items():
+                if sg_id in index.by_sg:
+                    index.by_sg[sg_id].somalier_path = str(new_path)
 
         output_prefix = dataset.prefix() / 'identity_checks'
 
@@ -131,11 +131,11 @@ class SomalierPedigreeCheck(stage.DatasetStage):
 
         index = get_project_sgs_and_fingerprints(dataset.name)
 
-        # Patch in newly-generated fingerprints via O(1) sg_id lookup
-        new_fingerprints = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
-        for sg_id, new_path in new_fingerprints.items():
-            if sg_id in index.by_sg:
-                index.by_sg[sg_id].somalier_path = str(new_path)
+        if find_sgids_without_somalier(index):
+            new_fingerprints = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
+            for sg_id, new_path in new_fingerprints.items():
+                if sg_id in index.by_sg:
+                    index.by_sg[sg_id].somalier_path = str(new_path)
 
         # Collect all somalier paths — participant_id comes from the dataclass
         somalier_paths: dict[str, str] = {}
