@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name='cpg_flow_rd_qc'
+name='rd_qc'
 description='Somalier Checks and eventually other QC checks for CPG-Flow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
@@ -27,7 +27,7 @@ dependencies=[
 ]
 
 [project.urls]
-Repository = "https://github.com/populationgenomics/cpg-flow-rd-qc"
+Repository = "https://github.com/populationgenomics/cpg-flow-relatedness"
 
 [project.optional-dependencies]
 test = [
