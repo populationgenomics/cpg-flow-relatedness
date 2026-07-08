@@ -11,6 +11,7 @@ from rd_qc.utils import (
 
 from cpg_flow import stage, targets
 from cpg_utils import Path, to_path
+from cpg_utils.config import config_retrieve
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
@@ -58,6 +59,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
         output_prefix = dataset.prefix() / 'identity_checks'
+        web_output_prefix = dataset.web_prefix() / 'identity_checks'
 
         outputs = {}
         for participant_id, sg_list in index.by_participant.items():
@@ -66,9 +68,10 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
             tag = sg_ids_tag([info.sg_id for info in sg_list])
             prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
+            web_prefix = web_output_prefix / participant_id / f'{tag}.somalier_identity_check'
             outputs[f'{participant_id}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
             outputs[f'{participant_id}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
-            outputs[f'{participant_id}_html'] = to_path(str(prefix) + '.html')
+            outputs[f'{participant_id}_html'] = to_path(str(web_prefix) + '.html')
 
         return outputs
 
@@ -115,13 +118,16 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 class SomalierPedigreeCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         prefix = dataset.prefix() / 'somalier_checks' / 'pedigree'
+        web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'
 
         output_prefix = prefix / dataset.name
+        web_output_prefix = web_prefix / dataset.name
+
         return {
             'samples': to_path(f'{output_prefix}.samples.tsv'),
             'pairs': to_path(f'{output_prefix}.pairs.tsv'),
             'expected_ped': prefix / f'{dataset.name}.expected.ped',
-            'html': to_path(f'{output_prefix}.html'),
+            'html': to_path(f'{web_output_prefix}.html'),
             'checks': prefix / f'{dataset.name}-checks.done',
         }
 
@@ -149,11 +155,16 @@ class SomalierPedigreeCheck(stage.DatasetStage):
 
         output_prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / dataset.name
 
+        access_level = config_retrieve(['workflow', 'access_level'])
+        subdomain = 'test-web' if access_level == 'test' else 'main-web'
+        relative_path = str(outputs['html']).split('/', 3)[3]
+        out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
+
         jobs = relate.pedigree_check_jobs(
             somalier_paths=somalier_paths,
             output_prefix=output_prefix,
             outputs=outputs,
-            out_html_url=str(outputs['html']),
+            out_html_url=out_html_url,
             dataset_name=dataset.name,
             label=f'{dataset.name} Somalier',
             job_attrs={},

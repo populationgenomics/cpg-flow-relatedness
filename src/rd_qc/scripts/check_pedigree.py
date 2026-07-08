@@ -19,6 +19,7 @@ from peddy import Ped
 from cpg_flow.metamist import get_metamist
 
 from cpg_utils import config, slack, to_path
+from cpg_utils.metamist_registration import create_output_block
 from metamist.apis import AnalysisApi
 from metamist.models import Analysis, AnalysisStatus
 
@@ -253,11 +254,10 @@ def run(
                 type='somalier_relate',
                 status=AnalysisStatus('completed'),
                 sequencing_group_ids=[sg_id],
-                outputs={
-                    'pairs': output_pairs,
-                    'samples': output_samples,
-                    'html': output_html,
-                },
+                outputs=create_output_block(
+                    primary=output_pairs,
+                    secondary={'samples': output_samples, 'html': output_html},
+                    ),
                 meta=sg_meta,
             ),
         )
