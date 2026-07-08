@@ -20,41 +20,50 @@ _MIN_SGS_FOR_IDENTITY_CHECK = 2
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
+        outputs: dict[str, Path] = {}
+
+        for info in index.by_sg.values():
+            if info.somalier_path is not None:
+                outputs[info.sg_id] = to_path(info.somalier_path)
+
         missing_sgids = find_sgids_without_somalier(index)
+        if missing_sgids:
+            extract_targets = select_somalier_extract_targets(
+                dataset.name,
+                tuple(sorted(missing_sgids)),
+            )
+            for sg_id, source_file in extract_targets.items():
+                outputs[sg_id] = to_path(f'{source_file}.somalier')
 
-        if not missing_sgids:
-            return {}
-
-        extract_targets = select_somalier_extract_targets(
-            dataset.name,
-            tuple(sorted(missing_sgids)),
-        )
-
-        return {sg_id: to_path(f'{source_file}.somalier') for sg_id, source_file in extract_targets.items()}
+        return outputs
 
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
         outputs = self.expected_outputs(dataset)
 
-        if not outputs:
-            return self.make_outputs(dataset, data=outputs)
-
         index = get_project_sgs_and_fingerprints(dataset.name)
         missing_sgids = find_sgids_without_somalier(index)
+
+        if not missing_sgids:
+            return self.make_outputs(dataset, data=outputs)
+
         extract_targets = select_somalier_extract_targets(
             dataset.name,
             tuple(sorted(missing_sgids)),
         )
 
+        # Only pass the missing SGs' output paths to the job builder
+        somalier_outputs = {sg_id: outputs[sg_id] for sg_id in extract_targets}
+
         jobs = generate_somalier.somalier_jobs(
             somalier_targets=extract_targets,
-            somalier_outputs=outputs,
+            somalier_outputs=somalier_outputs,
             project=dataset.name,
         )
 
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
 
 
-@stage.stage()
+@stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class RunCrossTypeIdentityChecks(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
@@ -75,18 +84,14 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
         return outputs
 
-    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa:ARG002
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
         if not outputs:
             return self.make_outputs(dataset, data=outputs)
 
+        all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
         index = get_project_sgs_and_fingerprints(dataset.name)
-
-        new_fingerprints = GenerateMissingSomalierFingerprints().expected_outputs(dataset)
-        for sg_id, new_path in new_fingerprints.items():
-            if sg_id in index.by_sg:
-                index.by_sg[sg_id].somalier_path = str(new_path)
 
         output_prefix = dataset.prefix() / 'identity_checks'
 
@@ -98,7 +103,9 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
-            somalier_paths = {info.sg_id: info.somalier_path for info in sg_list if info.somalier_path is not None}
+            somalier_paths = {
+                info.sg_id: str(all_somalier[info.sg_id]) for info in sg_list if info.sg_id in all_somalier
+            }
             if len(somalier_paths) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
@@ -123,7 +130,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
         return self.make_outputs(dataset, data=outputs, jobs=all_jobs)
 
 
-@stage.stage()
+@stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class SomalierPedigreeCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         prefix = dataset.prefix() / 'somalier_checks' / 'pedigree'
@@ -140,21 +147,13 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'checks': prefix / f'{dataset.name}-checks.done',
         }
 
-    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
+        all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
+        somalier_paths = {sg_id: str(path) for sg_id, path in all_somalier.items()}
+
         index = get_project_sgs_and_fingerprints(dataset.name)
-
-        new_fingerprints = GenerateMissingSomalierFingerprints().expected_outputs(dataset)
-        for sg_id, new_path in new_fingerprints.items():
-            if sg_id in index.by_sg:
-                index.by_sg[sg_id].somalier_path = str(new_path)
-
-        # Collect all somalier paths — participant_id comes from the dataclass
-        somalier_paths: dict[str, str] = {}
-        for info in index.by_sg.values():
-            if info.somalier_path is not None:
-                somalier_paths[info.sg_id] = info.somalier_path
 
         # Build PED file content and write to GCS at orchestration time
         ped_content = build_ped_content(dataset.name, index)
