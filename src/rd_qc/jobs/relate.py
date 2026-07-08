@@ -42,16 +42,16 @@ def identity_check_jobs(
         output={
             'pairs.tsv': '{root}.pairs.tsv',
             'samples.tsv': '{root}.samples.tsv',
-            'html': '{root}.html',
         }
     )
     relate_j.command(f'somalier relate -o {relate_j.output} inputs/*.somalier')
+    relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
     batch_instance.write_output(relate_j.output, output_prefix)
-    batch_instance.write_output(relate_j.output['html'], str(web_html_path))
+    batch_instance.write_output(relate_j.html_out, str(web_html_path))
 
     pairs_out = str(output_prefix) + '.pairs.tsv'
     samples_out = str(output_prefix) + '.samples.tsv'
-    html_out = str(output_prefix) + '.html'
+    html_out = str(web_html_path)
 
     kinship_threshold = config.config_retrieve(
         ['workflow', 'somalier_self_check', 'kinship_threshold'],
@@ -121,12 +121,12 @@ def pedigree_check_jobs(
         output={
             'pairs.tsv': '{root}.pairs.tsv',
             'samples.tsv': '{root}.samples.tsv',
-            'html': '{root}.html',
         }
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
+    relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
     batch_instance.write_output(relate_j.output, str(output_prefix))
-    batch_instance.write_output(relate_j.output['html'], str(outputs['html']))
+    batch_instance.write_output(relate_j.html_out, str(outputs['html']))
 
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'
