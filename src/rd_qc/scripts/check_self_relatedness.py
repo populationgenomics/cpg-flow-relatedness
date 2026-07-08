@@ -10,9 +10,9 @@ from argparse import ArgumentParser
 
 from loguru import logger
 
+from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack
 from cpg_utils.metamist_registration import create_output_block
-from cpg_flow.metamist import get_metamist
 from metamist.apis import AnalysisApi
 from metamist.models import Analysis, AnalysisStatus
 
@@ -99,7 +99,7 @@ def run(
             outputs=create_output_block(
                 primary=output_pairs,
                 secondary={'samples': output_samples, 'html': output_html},
-                ),
+            ),
             meta=meta,
         ),
     )

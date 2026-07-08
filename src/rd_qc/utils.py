@@ -8,8 +8,8 @@ from functools import cache
 from google.cloud import storage as gcs
 from loguru import logger
 
-from cpg_utils.config import config_retrieve
 from cpg_flow.metamist import get_metamist
+from cpg_utils.config import config_retrieve
 from metamist.graphql import gql, query
 
 
@@ -86,8 +86,6 @@ class SomalierIndex:
         for info in entries:
             self.by_participant.setdefault(info.participant_id, []).append(info)
             self.by_sg[info.sg_id] = info
-
-
 
 
 @cache

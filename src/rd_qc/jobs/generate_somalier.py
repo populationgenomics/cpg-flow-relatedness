@@ -77,7 +77,6 @@ def somalier_jobs(
         )
         registration_job.image(config.config_retrieve(['workflow', 'driver_image']))
 
-
         registration_job.call(
             register_analyses,
             output=str(output_path),

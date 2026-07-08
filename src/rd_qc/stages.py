@@ -109,7 +109,6 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             relative_path = str(outputs[html_key]).split('/', 3)[3]
             out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
 
-
             jobs = relate.identity_check_jobs(
                 participant_id=participant_id,
                 somalier_paths=somalier_paths,
