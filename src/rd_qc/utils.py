@@ -9,6 +9,7 @@ from google.cloud import storage as gcs
 from loguru import logger
 
 from cpg_utils.config import config_retrieve
+from cpg_flow.metamist import get_metamist
 from metamist.graphql import gql, query
 
 
@@ -87,16 +88,12 @@ class SomalierIndex:
             self.by_sg[info.sg_id] = info
 
 
-def _resolve_project(project: str) -> str:
-    if config_retrieve(['workflow', 'access_level']) == 'test' and not project.endswith('-test'):
-        return project + '-test'
-    return project
 
 
 @cache
 def _query_project_sgs(project: str) -> list[dict]:
     """Cached metamist query — returns raw response data."""
-    resolved = _resolve_project(project)
+    resolved = get_metamist().get_metamist_proj(project)
     response = query(SG_QUERY, variables={'project': resolved})
     return response['project']['sequencingGroups']
 
@@ -168,7 +165,7 @@ def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> dic
 
     Returns {sg_id: source_file_path} for SGs where a suitable file was found.
     """
-    resolved = _resolve_project(project)
+    resolved = get_metamist().get_metamist_proj(project)
     response = query(ANALYSIS_QUERY, variables={'project': resolved, 'sgIds': list(sgids)})
 
     targets: dict[str, str] = {}
@@ -190,7 +187,7 @@ def get_project_pedigree(project: str) -> list[dict]:
     Returns the raw pedigree list with family_id, individual_id, paternal_id,
     maternal_id, sex, affected for every individual (including unsequenced).
     """
-    resolved = _resolve_project(project)
+    resolved = get_metamist().get_metamist_proj(project)
     response = query(PEDIGREE_QUERY, variables={'project': resolved})
     return response['project']['pedigree']
 

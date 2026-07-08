@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 from loguru import logger
 
 from cpg_utils import config, slack
+from cpg_flow.metamist import get_metamist
 from metamist.apis import AnalysisApi
 from metamist.models import Analysis, AnalysisStatus
 
@@ -25,6 +26,7 @@ def run(
     output_samples: str,
     output_html: str,
 ):
+    dataset = get_metamist().get_metamist_proj(dataset)
     logger.info(f'Checking self-relatedness for {participant_id} in {dataset}')
     logger.info(f'Kinship threshold: {kinship_threshold}')
 
