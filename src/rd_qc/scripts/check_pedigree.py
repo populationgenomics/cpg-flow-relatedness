@@ -18,9 +18,7 @@ from peddy import Ped
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
-from cpg_utils.metamist_registration import create_output_block
-from metamist.apis import AnalysisApi
-from metamist.models import Analysis, AnalysisStatus
+from cpg_utils.metamist_registration import create_new
 
 _messages: list[str] = []
 
@@ -240,25 +238,19 @@ def run(
 
     all_issues = mismatching_unrelated_to_related + mismatching_related_to_unrelated
 
-    analysis_api = AnalysisApi()
     for sg_id in sg_ids:
         sg_meta = {
             'check': 'pedigree',
             'sex_match': sg_id not in sex_mismatch_ids,
             'relatedness_issues': [issue for issue in all_issues if sg_id in issue],
         }
-        analysis_api.create_analysis(
+        create_new(
             project=dataset,
-            analysis=Analysis(
-                type='somalier_relate',
-                status=AnalysisStatus('completed'),
-                sequencing_group_ids=[sg_id],
-                outputs=create_output_block(
-                    primary=output_pairs,
-                    secondary={'samples': output_samples, 'html': output_html},
-                ),
-                meta=sg_meta,
-            ),
+            output=output_pairs,
+            analysis_type='somalier_relate',
+            sgs=[sg_id],
+            meta=sg_meta,
+            secondary={'samples': output_samples, 'html': output_html},
         )
     logger.info(f'Registered somalier_relate analyses for {len(sg_ids)} SGs')
 

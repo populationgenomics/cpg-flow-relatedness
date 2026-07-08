@@ -12,9 +12,7 @@ from loguru import logger
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack
-from cpg_utils.metamist_registration import create_output_block
-from metamist.apis import AnalysisApi
-from metamist.models import Analysis, AnalysisStatus
+from cpg_utils.metamist_registration import create_new
 
 
 def run(
@@ -90,18 +88,13 @@ def run(
         'flagged_pairs': low_kinship_pairs,
     }
 
-    AnalysisApi().create_analysis(
+    create_new(
         project=dataset,
-        analysis=Analysis(
-            type='somalier_relate',
-            status=AnalysisStatus('completed'),
-            sequencing_group_ids=sg_ids,
-            outputs=create_output_block(
-                primary=output_pairs,
-                secondary={'samples': output_samples, 'html': output_html},
-            ),
-            meta=meta,
-        ),
+        output=output_pairs,
+        analysis_type='somalier_relate',
+        sgs=sg_ids,
+        meta=meta,
+        secondary={'samples': output_samples, 'html': output_html},
     )
     logger.info(f'Registered somalier_relate analysis for participant {participant_id}')
 
