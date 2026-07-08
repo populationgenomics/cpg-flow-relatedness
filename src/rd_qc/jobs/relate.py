@@ -12,6 +12,8 @@ def identity_check_jobs(
     somalier_paths: dict[str, str | Path],
     output_prefix: Path,
     dataset_name: str,
+    out_html_url: str,
+    web_html_path: Path,
     job_attrs: dict[str, str],
 ) -> list[BashJob]:
     """
@@ -45,6 +47,7 @@ def identity_check_jobs(
     )
     relate_j.command(f'somalier relate -o {relate_j.output} inputs/*.somalier')
     batch_instance.write_output(relate_j.output, output_prefix)
+    batch_instance.write_output(relate_j.output['html'], str(web_html_path))
 
     pairs_out = str(output_prefix) + '.pairs.tsv'
     samples_out = str(output_prefix) + '.samples.tsv'
@@ -72,7 +75,8 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     --sg-ids {sg_ids_str} \\
     --output-pairs {pairs_out} \\
     --output-samples {samples_out} \\
-    --output-html {html_out}
+    --output-html {html_out} \\
+    --html-url {out_html_url}
 """)
 
     return [relate_j, check_j]
@@ -122,6 +126,7 @@ def pedigree_check_jobs(
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
     batch_instance.write_output(relate_j.output, str(output_prefix))
+    batch_instance.write_output(relate_j.output['html'], str(outputs['html']))
 
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'

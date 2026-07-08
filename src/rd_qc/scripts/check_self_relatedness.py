@@ -26,6 +26,7 @@ def run(
     output_pairs: str,
     output_samples: str,
     output_html: str,
+    html_url: str,
 ):
     dataset = get_metamist().get_metamist_proj(dataset)
     logger.info(f'Checking self-relatedness for {participant_id} in {dataset}')
@@ -57,8 +58,11 @@ def run(
     if passed:
         logger.info(f'{participant_id}: All pairs have kinship >= {kinship_threshold}')
     else:
+        header = f'Self-relatedness check failed for participant {participant_id}'
+        if html_url:
+            header = f'<{html_url}|{header}>'
         lines = [
-            f'*[{dataset}] Self-relatedness check failed for participant {participant_id}*',
+            f'*[{dataset}]* {header}',
             f'Expected kinship ~1.0 (threshold: {kinship_threshold}), found:',
         ]
         for pair in low_kinship_pairs:
@@ -112,6 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--output-pairs', required=True)
     parser.add_argument('--output-samples', required=True)
     parser.add_argument('--output-html', required=True)
+    parser.add_argument('--html-url', required=True, help='Web-accessible URL for HTML report')
     args = parser.parse_args()
     run(
         pairs_fpath=args.pairs_tsv,
@@ -122,4 +127,5 @@ if __name__ == '__main__':
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,
         output_html=args.output_html,
+        html_url=args.html_url,
     )

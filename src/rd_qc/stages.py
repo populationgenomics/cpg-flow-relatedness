@@ -90,6 +90,9 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 
         output_prefix = dataset.prefix() / 'identity_checks'
 
+        access_level = config_retrieve(['workflow', 'access_level'])
+        subdomain = 'test-web' if access_level == 'test' else 'main-web'
+
         all_jobs = []
         for participant_id, sg_list in index.by_participant.items():
             if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
@@ -102,11 +105,18 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             tag = sg_ids_tag([info.sg_id for info in sg_list])
             prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
 
+            html_key = f'{participant_id}_html'
+            relative_path = str(outputs[html_key]).split('/', 3)[3]
+            out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
+
+
             jobs = relate.identity_check_jobs(
                 participant_id=participant_id,
                 somalier_paths=somalier_paths,
                 output_prefix=prefix,
                 dataset_name=dataset.name,
+                out_html_url=out_html_url,
+                web_html_path=outputs[html_key],
                 job_attrs={'participant': participant_id},
             )
             all_jobs.extend(jobs)
