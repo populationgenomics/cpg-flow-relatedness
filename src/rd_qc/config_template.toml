@@ -23,3 +23,8 @@ somalier_sites = "gs://cpg-common-main/references/somalier/sites.hg38.vcf.gz"
 
 [images]
 somalier = "australia-southeast1-docker.pkg.dev/cpg-common/images/somalier:0.3.1-1"
+
+[slack]
+channel = 'workflows-qc'
+token_secret_id = 'slack-seqr-loader-token'
+token_project_id = 'seqr-308602'
