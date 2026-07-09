@@ -1,116 +1,190 @@
-"""This file exists to define all the Stages for the workflow."""
+"""Stages for the rd_qc somalier QC workflow."""
 
-from argparse import ArgumentParser
-from itertools import combinations
+from rd_qc.jobs import generate_somalier, relate
+from rd_qc.utils import (
+    SomalierIndex,
+    build_ped_content,
+    find_sgids_without_somalier,
+    get_project_sgs_and_fingerprints,
+    select_somalier_extract_targets,
+    sg_ids_tag,
+)
 
-from cpg_flow import stage, targets, workflow, utils as flow_utils
-from cpg_flow.targets import dataset
-from cpg_utils import config, to_path, Path
+from cpg_flow import stage, targets
+from cpg_utils import Path, to_path
+from cpg_utils.config import config_retrieve
 
-from rd_qc.jobs import generate_somalier
-from rd_qc.utils import get_project_sgs_and_fingerprints, find_sgids_without_somalier, select_somalier_extract_targets
+_MIN_SGS_FOR_IDENTITY_CHECK = 2
+
+
+def _relevant_sg_ids(dataset: targets.Dataset, index: SomalierIndex) -> set[str]:
+    """SG IDs for participants who have at least one SG in the cohort."""
+    cohort_sg_ids = {sg.id for sg in dataset.get_sequencing_groups()}
+    cohort_participants = {index.by_sg[sg_id].participant_id for sg_id in cohort_sg_ids if sg_id in index.by_sg}
+    return {info.sg_id for pid in cohort_participants for info in index.by_participant[pid]}
 
 
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
-
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
-        """
-        Ok, right, this is where it gets weird. First stage, weird already...
-        """
+        index = get_project_sgs_and_fingerprints(dataset.name)
+        outputs: dict[str, Path] = {}
 
-        # get all SG IDs in the dataset. Not in the 'Dataset', but across all sequencing groups in the whole project
-        all_sgid_somaliers = get_project_sgs_and_fingerprints(dataset.name)
+        for info in index.by_sg.values():
+            if info.somalier_path is not None:
+                outputs[info.sg_id] = to_path(info.somalier_path)
 
-        all_sgids_missing_somalier = find_sgids_without_somalier(...)
+        relevant = _relevant_sg_ids(dataset, index)
+        missing_sgids = find_sgids_without_somalier(index) & relevant
+        if missing_sgids:
+            extract_targets = select_somalier_extract_targets(
+                dataset.name,
+                tuple(sorted(missing_sgids)),
+            )
+            for sg_id, source_file in extract_targets.items():
+                outputs[sg_id] = to_path(f'{source_file}.somalier')
 
-        new_somalier_targets = select_somalier_extract_targets(...)
-
-        return {key: to_path(f'{value}.somalier') for key, value in new_somalier_targets.items()}
+        return outputs
 
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
-        """
-        This is where we generate jobs for this stage.
-        """
-
-        # all the required outputs. Inputs are this - the somalier extension
         outputs = self.expected_outputs(dataset)
 
-        # or just re-generate the inputs using the cached methods...
-        all_sgid_somaliers = get_project_sgs_and_fingerprints(dataset.name)
+        index = get_project_sgs_and_fingerprints(dataset.name)
+        missing_sgids = find_sgids_without_somalier(index) & _relevant_sg_ids(dataset, index)
 
-        all_sgids_missing_somalier = find_sgids_without_somalier(...)
+        if not missing_sgids:
+            return self.make_outputs(dataset, data=outputs)
 
-        new_somalier_targets = select_somalier_extract_targets(...)
+        extract_targets = select_somalier_extract_targets(
+            dataset.name,
+            tuple(sorted(missing_sgids)),
+        )
 
-        # feed the new_somalier_targets into a job to generate each file
+        # Only pass the missing SGs' output paths to the job builder
+        somalier_outputs = {sg_id: outputs[sg_id] for sg_id in extract_targets}
 
-        # run a second job to register each somalier file (just like in the rna dashboard)
-        jobs = generate_somalier.somalier_jobs(new_somalier_targets)
+        jobs = generate_somalier.somalier_jobs(
+            somalier_targets=extract_targets,
+            somalier_outputs=somalier_outputs,
+            project=dataset.name,
+        )
 
-
-        # return the jobs and outputs
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
 
 
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class RunCrossTypeIdentityChecks(stage.DatasetStage):
+    def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
+        index = get_project_sgs_and_fingerprints(dataset.name)
+        output_prefix = dataset.prefix() / 'identity_checks'
+        web_output_prefix = dataset.web_prefix() / 'identity_checks'
 
-    def expected_outputs(self, dataset: targets.Dataset) -> list[Path]:
-        """
-        For this dataset we first need to know which pairs are possible. We do this by re-using the cached db query
-        This contains all possible combinations, and the expectation that somalier files that didn't exist were populated by the previous stage.
-        """
-        all_sgid_somaliers = get_project_sgs_and_fingerprints(dataset.name)
-        output_prefix = to_path(config.config_retrieve(['storage', dataset.name, 'default'])) / 'identity_checks'
+        outputs = {}
+        for participant_id, sg_list in index.by_participant.items():
+            if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
+                continue
 
-        output_paths = []
-        for participant_id, sgid_map in all_sgid_somaliers.items():
+            tag = sg_ids_tag([info.sg_id for info in sg_list])
+            prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
+            web_prefix = web_output_prefix / participant_id / f'{tag}.somalier_identity_check'
+            outputs[f'{participant_id}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
+            outputs[f'{participant_id}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
+            outputs[f'{participant_id}_html'] = to_path(str(web_prefix) + '.html')
 
-            for sgid1, sgid2 in combinations(sgid_map.keys(), 2):
-
-                # re-use the sgid sorting method to get a consistent file name
-                new_file = output_prefix / participant_id / f'{sgid1}_{sgid2}.check'
-
-                # check if this already exists using the efficient cached existence method
-                if not flow_utils.exists(new_file):
-                    # if it doesn't exist, add it as an output
-                    output_paths.append(new_file)
-
-        return output_paths
+        return outputs
 
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
-        """
-        This might be a bit rogue
-        """
-
         outputs = self.expected_outputs(dataset)
 
-        # get just the file names as a nifty little set
-        output_names = {out.name for out in outputs}
+        if not outputs:
+            return self.make_outputs(dataset, data=outputs)
 
-        # take the input from the previous stage ({sgid: new somalier file})
-        new_somalier_files = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
+        all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
+        index = get_project_sgs_and_fingerprints(dataset.name)
 
-        all_sgid_somaliers = get_project_sgs_and_fingerprints(dataset.name)
+        output_prefix = dataset.prefix() / 'identity_checks'
 
-        # update the None entries in all_sgid_somaliers with the new somalier fingerprints generated in the previous stage
-        ...
+        access_level = config_retrieve(['workflow', 'access_level'])
+        subdomain = 'test-web' if access_level == 'test' else 'main-web'
 
-        for participant, sgid_map in all_sgid_somaliers.items():
-            for sgid1, sgid2 in combinations(sgid_map.keys(), 2):
-                # if this one doesn't exist yet (in list of non-existent files)
-                if f'{sgid1}_{sgid2}.check' in output_names:
+        all_jobs = []
+        for participant_id, sg_list in index.by_participant.items():
+            if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
+                continue
 
-                    # invoke the method which takes two somalier files, runs _relate_, creates output, and registers
-                    ...
+            somalier_paths = {
+                info.sg_id: str(all_somalier[info.sg_id]) for info in sg_list if info.sg_id in all_somalier
+            }
+            if len(somalier_paths) < _MIN_SGS_FOR_IDENTITY_CHECK:
+                continue
+
+            tag = sg_ids_tag([info.sg_id for info in sg_list])
+            prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
+
+            html_key = f'{participant_id}_html'
+            relative_path = str(outputs[html_key]).split('/', 3)[3]
+            out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
+
+            jobs = relate.identity_check_jobs(
+                participant_id=participant_id,
+                somalier_paths=somalier_paths,
+                output_prefix=prefix,
+                dataset_name=dataset.name,
+                out_html_url=out_html_url,
+                web_html_path=outputs[html_key],
+                job_attrs={'participant': participant_id},
+            )
+            all_jobs.extend(jobs)
+
+        return self.make_outputs(dataset, data=outputs, jobs=all_jobs)
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('--dry_run', action='store_true', help='Dry run')
-    args = parser.parse_args()
+@stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
+class SomalierPedigreeCheck(stage.DatasetStage):
+    def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
+        prefix = dataset.prefix() / 'somalier_checks' / 'pedigree'
+        web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'
 
-    stages = [GenerateMissingSomalierFingerprints, RunCrossTypeIdentityChecks]
+        output_prefix = prefix / dataset.name
+        web_output_prefix = web_prefix / dataset.name
 
-    workflow.run_workflow(name='rd_qc', stages=stages, dry_run=args.dry_run)
+        return {
+            'samples': to_path(f'{output_prefix}.samples.tsv'),
+            'pairs': to_path(f'{output_prefix}.pairs.tsv'),
+            'expected_ped': prefix / f'{dataset.name}.expected.ped',
+            'html': to_path(f'{web_output_prefix}.html'),
+            'checks': prefix / f'{dataset.name}-checks.done',
+        }
+
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+        outputs = self.expected_outputs(dataset)
+
+        all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
+        somalier_paths = {sg_id: str(path) for sg_id, path in all_somalier.items()}
+
+        index = get_project_sgs_and_fingerprints(dataset.name)
+
+        # Build PED file content and write to GCS at orchestration time
+        ped_content = build_ped_content(dataset.name, index)
+        ped_path = outputs['expected_ped']
+        with to_path(ped_path).open('w') as f:
+            f.write(ped_content)
+
+        output_prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / dataset.name
+
+        access_level = config_retrieve(['workflow', 'access_level'])
+        subdomain = 'test-web' if access_level == 'test' else 'main-web'
+        relative_path = str(outputs['html']).split('/', 3)[3]
+        out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
+
+        jobs = relate.pedigree_check_jobs(
+            somalier_paths=somalier_paths,
+            output_prefix=output_prefix,
+            outputs=outputs,
+            out_html_url=out_html_url,
+            dataset_name=dataset.name,
+            label=f'{dataset.name} Somalier',
+            job_attrs={},
+        )
+
+        return self.make_outputs(dataset, data=outputs, jobs=jobs)

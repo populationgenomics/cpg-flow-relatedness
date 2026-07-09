@@ -4,3 +4,27 @@ input_cohorts = []
 sequencing_type = 'genome'
 
 status_reporter = 'metamist'
+name = 'rd_qc'
+
+[workflow.somalier_self_check]
+kinship_threshold = 0.9
+send_to_slack = true
+
+[workflow.somalier_pedigree]
+send_to_slack = true
+
+[workflow.somalier_extract]
+# Priority order for source file selection when extracting fingerprints
+# Options: "vcf","gvcf", "cram",
+priority = [ "vcf","gvcf","cram" ]
+
+[references]
+somalier_sites = "gs://cpg-common-main/references/somalier/sites.hg38.vcf.gz"
+
+[images]
+somalier = "australia-southeast1-docker.pkg.dev/cpg-common/images/somalier:0.3.1-1"
+
+[slack]
+channel = 'workflows-qc'
+token_secret_id = 'slack-seqr-loader-token'
+token_project_id = 'seqr-308602'

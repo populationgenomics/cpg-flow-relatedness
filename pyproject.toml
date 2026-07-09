@@ -3,12 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name='cpg_flow_rd_qc'
-description='Template workflow'
+name='rd_qc'
+description='Somalier Checks and eventually other QC checks for CPG-Flow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
 requires-python = ">=3.10,<3.12"
-version="0.0.1"
+version='0.1.2'
 license={ "file" = "LICENSE" }
 classifiers=[
     'Environment :: Console',
@@ -22,10 +22,12 @@ classifiers=[
 
 dependencies=[
     'cpg-flow~=1.3',
+    'peddy',
+    'slack_sdk',
 ]
 
 [project.urls]
-Repository = "https://github.com/populationgenomics/cpg-flow-rd-qc"
+Repository = "https://github.com/populationgenomics/cpg-flow-relatedness"
 
 [project.optional-dependencies]
 test = [
@@ -35,10 +37,10 @@ test = [
 ]
 
 [project.scripts]
-run_workflow = 'workflow_name.stages:cli_main'
+run_workflow = 'rd_qc.run_workflow:cli_main'
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/workflow_name"]
+packages = ["src/rd_qc"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = ""
@@ -47,7 +49,7 @@ packages = ["src/workflow_name"]
 include_package_data = true
 
 [options.package_data]
-'workflow_name'=  ['config_template.toml']
+'rd_qc'=  ['config_template.toml']
 
 [tool.mypy]
 ignore_missing_imports = true
@@ -94,7 +96,7 @@ cpg = ["metamist", "cpg_utils", "cpg_flow"]
 hail = ["hail"]
 
 [tool.bumpversion]
-current_version = "0.1.1"
+current_version = "0.1.2"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 commit = true
