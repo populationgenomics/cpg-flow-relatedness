@@ -15,8 +15,8 @@ send_to_slack = true
 
 [workflow.somalier_extract]
 # Priority order for source file selection when extracting fingerprints
-# Options: "cram", "gvcf", "vcf"
-priority = ["cram", "gvcf", "vcf"]
+# Options: "vcf","gvcf", "cram",
+priority = [ "vcf","gvcf","cram" ]
 
 [references]
 somalier_sites = "gs://cpg-common-main/references/somalier/sites.hg38.vcf.gz"
