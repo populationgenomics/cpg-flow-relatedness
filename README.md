@@ -2,6 +2,6 @@
 
 A central repository for RD QC workflows
 
-Current version: 0.1.2
+Current version: 0.1.3
 
 the rest of this readme TBD
