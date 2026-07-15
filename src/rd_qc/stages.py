@@ -105,8 +105,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
         missing_participants = {
             pid
             for pid, sg_list in index.by_participant.items()
-            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK
-            and not to_path(outputs[f'{pid}_samples_tsv']).exists()
+            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not to_path(outputs[f'{pid}_samples_tsv']).exists()
         }
 
         if not missing_participants:
