@@ -13,6 +13,7 @@ from rd_qc.utils import (
 from cpg_flow import stage, targets
 from cpg_utils import Path, to_path
 from cpg_utils.config import config_retrieve
+from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
@@ -105,7 +106,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
         missing_participants = {
             pid
             for pid, sg_list in index.by_participant.items()
-            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not to_path(outputs[f'{pid}_samples_tsv']).exists()
+            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not exists(outputs[f'{pid}_samples_tsv'])
         }
 
         if not missing_participants:
