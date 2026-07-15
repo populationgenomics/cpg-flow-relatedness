@@ -129,7 +129,7 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
     """
     priority = config_retrieve(
         ['workflow', 'somalier_extract', 'priority'],
-        ['gvcf', 'cram'],
+        ['cram', 'gvcf'],
     )
 
     buckets: dict[str, list[str]] = {'cram': [], 'gvcf': []}
