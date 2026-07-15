@@ -49,7 +49,7 @@ ANALYSIS_QUERY = gql("""
         project(name: $project) {
             sequencingGroups(id: {in_: $sgIds}) {
                 id
-                analyses(type: {in_: ["cram", "gvcf", "vcf"]}) {
+                analyses(type: {in_: ["cram", "gvcf"]}) {
                     outputs
                     type
                     meta
@@ -129,10 +129,10 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
     """
     priority = config_retrieve(
         ['workflow', 'somalier_extract', 'priority'],
-        ['vcf', 'gvcf', 'cram'],
+        ['cram', 'gvcf'],
     )
 
-    buckets: dict[str, list[str]] = {'cram': [], 'gvcf': [], 'vcf': []}
+    buckets: dict[str, list[str]] = {'cram': [], 'gvcf': []}
 
     for analysis in analyses:
         output = (analysis.get('outputs') or {}).get('path', '')
@@ -146,8 +146,6 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
             buckets['cram'].append(output)
         elif analysis_type == 'gvcf':
             buckets['gvcf'].append(output)
-        elif analysis_type == 'vcf':
-            buckets['vcf'].append(output)
 
     for file_type in priority:
         if buckets.get(file_type):

@@ -13,6 +13,7 @@ from rd_qc.utils import (
 from cpg_flow import stage, targets
 from cpg_utils import Path, to_path
 from cpg_utils.config import config_retrieve
+from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
@@ -102,15 +103,23 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
         all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
         index = get_project_sgs_and_fingerprints(dataset.name)
 
+        missing_participants = {
+            pid
+            for pid, sg_list in index.by_participant.items()
+            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not exists(outputs[f'{pid}_samples_tsv'])
+        }
+
+        if not missing_participants:
+            return self.make_outputs(dataset, data=outputs)
+
         output_prefix = dataset.prefix() / 'identity_checks'
 
         access_level = config_retrieve(['workflow', 'access_level'])
         subdomain = 'test-web' if access_level == 'test' else 'main-web'
 
         all_jobs = []
-        for participant_id, sg_list in index.by_participant.items():
-            if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
-                continue
+        for participant_id in missing_participants:
+            sg_list = index.by_participant[participant_id]
 
             somalier_paths = {
                 info.sg_id: str(all_somalier[info.sg_id]) for info in sg_list if info.sg_id in all_somalier
