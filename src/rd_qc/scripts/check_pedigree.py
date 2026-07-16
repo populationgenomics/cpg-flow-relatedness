@@ -233,7 +233,7 @@ def run(
         title = 'Somalier pedigree report'
     text = '\n'.join([title, *_messages])
 
-    if config.config_retrieve(['workflow', 'somalier_pedigree', 'send_to_slack'], default=True):
+    if config.config_retrieve(['somalier_pedigree', 'send_to_slack'], default=True):
         slack.send_message(text)
 
     all_issues = mismatching_unrelated_to_related + mismatching_related_to_unrelated

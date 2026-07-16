@@ -31,7 +31,7 @@ def identity_check_jobs(
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
     storage_gb = 1 + len(somalier_paths) // 4000
-    relate_j.storage(f'{storage_gb}Gi')
+    relate_j.storage(f'{storage_gb}GiB')
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
@@ -54,7 +54,7 @@ def identity_check_jobs(
     html_out = str(web_html_path)
 
     kinship_threshold = config.config_retrieve(
-        ['workflow', 'somalier_self_check', 'kinship_threshold'],
+        ['somalier_self_check', 'kinship_threshold'],
         0.9,
     )
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
@@ -84,7 +84,6 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
-    output_prefix: Path,
     outputs: dict[str, Path],
     out_html_url: str,
     dataset_name: str,
@@ -108,7 +107,7 @@ def pedigree_check_jobs(
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
     storage_gb = 1 + len(somalier_paths) // 4000
-    relate_j.storage(f'{storage_gb}Gi')
+    relate_j.storage(f'{storage_gb}GiB')
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
@@ -125,7 +124,7 @@ def pedigree_check_jobs(
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, str(output_prefix))
+    batch_instance.write_output(relate_j.output, outputs['output_prefix'])
     batch_instance.write_output(relate_j.html_out, str(outputs['html']))
 
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))

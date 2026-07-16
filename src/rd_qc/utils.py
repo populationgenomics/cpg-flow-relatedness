@@ -128,7 +128,7 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
     Default priority: CRAM > gVCF > VCF (configurable).
     """
     priority = config_retrieve(
-        ['workflow', 'somalier_extract', 'priority'],
+        ['somalier_extract', 'priority'],
         ['cram', 'gvcf'],
     )
 
