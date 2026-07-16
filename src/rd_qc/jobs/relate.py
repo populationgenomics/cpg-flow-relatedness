@@ -9,11 +9,9 @@ from cpg_utils import Path, config, hail_batch
 
 def identity_check_jobs(
     participant_id: str,
+    outputs: dict[str, Path | str],
     somalier_paths: dict[str, str | Path],
-    output_prefix: Path,
     dataset_name: str,
-    out_html_url: str,
-    web_html_path: Path,
     job_attrs: dict[str, str],
 ) -> list[BashJob]:
     """
@@ -31,7 +29,7 @@ def identity_check_jobs(
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
     storage_gb = 1 + len(somalier_paths) // 4000
-    relate_j.storage(f'{storage_gb}Gi')
+    relate_j.storage(f'{storage_gb}GiB')
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
@@ -46,15 +44,11 @@ def identity_check_jobs(
     )
     relate_j.command(f'somalier relate -o {relate_j.output} inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, output_prefix)
-    batch_instance.write_output(relate_j.html_out, str(web_html_path))
-
-    pairs_out = str(output_prefix) + '.pairs.tsv'
-    samples_out = str(output_prefix) + '.samples.tsv'
-    html_out = str(web_html_path)
+    batch_instance.write_output(relate_j.output, outputs[f'{participant_id}_prefix'])
+    batch_instance.write_output(relate_j.html_out, outputs[f'{participant_id}_html'])
 
     kinship_threshold = config.config_retrieve(
-        ['workflow', 'somalier_self_check', 'kinship_threshold'],
+        ['somalier_self_check', 'kinship_threshold'],
         0.9,
     )
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
@@ -66,6 +60,11 @@ def identity_check_jobs(
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
+    out_html_url = str(outputs[f'{participant_id}_html']).replace(
+        config.config_retrieve(['storage', dataset_name, 'web']),
+        config.config_retrieve(['storage', dataset_name, 'web_url']),
+    )
+
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
     --pairs-tsv {relate_j.output['pairs.tsv']} \\
@@ -73,9 +72,9 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     --dataset {dataset_name} \\
     --kinship-threshold {kinship_threshold} \\
     --sg-ids {sg_ids_str} \\
-    --output-pairs {pairs_out} \\
-    --output-samples {samples_out} \\
-    --output-html {html_out} \\
+    --output-pairs {outputs[f'{participant_id}_pairs_tsv']!s} \\
+    --output-samples {outputs[f'{participant_id}_samples_tsv']!s} \\
+    --output-html {outputs[f'{participant_id}_html']!s} \\
     --html-url {out_html_url}
 """)
 
@@ -84,9 +83,7 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
-    output_prefix: Path,
     outputs: dict[str, Path],
-    out_html_url: str,
     dataset_name: str,
     label: str,
     job_attrs: dict[str, str],
@@ -108,7 +105,7 @@ def pedigree_check_jobs(
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
     storage_gb = 1 + len(somalier_paths) // 4000
-    relate_j.storage(f'{storage_gb}Gi')
+    relate_j.storage(f'{storage_gb}GiB')
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
@@ -125,7 +122,7 @@ def pedigree_check_jobs(
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, str(output_prefix))
+    batch_instance.write_output(relate_j.output, outputs['output_prefix'])
     batch_instance.write_output(relate_j.html_out, str(outputs['html']))
 
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
@@ -134,6 +131,11 @@ def pedigree_check_jobs(
     check_j = batch_instance.new_bash_job(title, job_attrs)
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
+
+    out_html_url = str(outputs['html']).replace(
+        config.config_retrieve(['storage', dataset_name, 'web']),
+        config.config_retrieve(['storage', dataset_name, 'web_url']),
+    )
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\

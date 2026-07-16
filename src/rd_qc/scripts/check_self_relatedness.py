@@ -74,7 +74,7 @@ def run(
         logger.warning(text)
 
         if config.config_retrieve(
-            ['workflow', 'somalier_self_check', 'send_to_slack'],
+            ['somalier_self_check', 'send_to_slack'],
             default=True,
         ):
             slack.send_message(text)
