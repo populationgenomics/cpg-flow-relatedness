@@ -133,8 +133,8 @@ def pedigree_check_jobs(
     check_j.depends_on(relate_j)
 
     out_html_url = str(outputs['html']).replace(
-        config_retrieve(['storage', dataset_name, 'web']),
-        config_retrieve(['storage', dataset_name, 'web_url']),
+        config.config_retrieve(['storage', dataset_name, 'web']),
+        config.config_retrieve(['storage', dataset_name, 'web_url']),
     )
 
     cmd = f"""\

@@ -12,7 +12,6 @@ from rd_qc.utils import (
 
 from cpg_flow import stage, targets
 from cpg_utils import Path, to_path
-from cpg_utils.config import config_retrieve
 from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
