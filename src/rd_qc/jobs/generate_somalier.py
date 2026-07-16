@@ -47,10 +47,10 @@ def somalier_jobs(
         )
         j.image(config.config_retrieve(['images', 'somalier']))
         try:
-            storage_gb = get_gcs_object_size(source_file, gcs_client, buffer=10)
+            storage_gb = get_gcs_object_size(source_file, gcs_client)
         except NotFound:
             storage_gb = 50
-        j.storage(f'{storage_gb}Gi')
+        j.storage(f'{storage_gb}GiB')
 
         is_cram = source_file.endswith('.cram')
         if is_cram:

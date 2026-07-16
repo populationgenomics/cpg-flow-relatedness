@@ -31,7 +31,7 @@ def identity_check_jobs(
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
     storage_gb = 1 + len(somalier_paths) // 4000
-    relate_j.storage(f'{storage_gb}Gi')
+    relate_j.storage(f'{storage_gb}GiB')
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
@@ -108,7 +108,7 @@ def pedigree_check_jobs(
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
     storage_gb = 1 + len(somalier_paths) // 4000
-    relate_j.storage(f'{storage_gb}Gi')
+    relate_j.storage(f'{storage_gb}GiB')
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():

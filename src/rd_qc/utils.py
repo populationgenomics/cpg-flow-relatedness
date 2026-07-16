@@ -13,16 +13,19 @@ from cpg_utils.config import config_retrieve
 from metamist.graphql import gql, query
 
 
-def get_gcs_object_size(fullpath: str, client: gcs.Client, buffer: int = 0) -> int:
+def get_gcs_object_size(fullpath: str, client: gcs.Client) -> int:
     """
-    Get exact object size in GCS in GB, plus optional buffer for intermediate files.
-    Returns 0 + buffer if the object is under 1GB.
+    Get exact object size in GCS in GB, plus buffer for intermediate files.
+    Returns 10 + buffer if the object is under 1GB.
     """
+    buffer = config_retrieve(
+        ['workflow', 'somalier_extract', 'storage_buffer'],
+        20,
+    )
     bucket_name, filepath = fullpath.removeprefix('gs://').split('/', 1)
     blob = client.bucket(bucket_name).blob(filepath)
     blob.reload()
-    size = blob.size // (1024**3)
-    return size + buffer
+    return max((blob_size // (1024**3), 10)) + buffer
 
 
 SG_QUERY = gql("""
