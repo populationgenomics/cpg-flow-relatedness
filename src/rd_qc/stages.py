@@ -12,7 +12,6 @@ from rd_qc.utils import (
 
 from cpg_flow import stage, targets
 from cpg_utils import Path, to_path
-from cpg_utils.config import config_retrieve
 from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
@@ -88,6 +87,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             tag = sg_ids_tag([info.sg_id for info in sg_list])
             prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
             web_prefix = web_output_prefix / participant_id / f'{tag}.somalier_identity_check'
+            outputs[f'{participant_id}_prefix'] = str(prefix)
             outputs[f'{participant_id}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
             outputs[f'{participant_id}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
             outputs[f'{participant_id}_html'] = to_path(str(web_prefix) + '.html')
@@ -112,11 +112,6 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
         if not missing_participants:
             return self.make_outputs(dataset, data=outputs)
 
-        output_prefix = dataset.prefix() / 'identity_checks'
-
-        access_level = config_retrieve(['workflow', 'access_level'])
-        subdomain = 'test-web' if access_level == 'test' else 'main-web'
-
         all_jobs = []
         for participant_id in missing_participants:
             sg_list = index.by_participant[participant_id]
@@ -127,20 +122,11 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             if len(somalier_paths) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
-            tag = sg_ids_tag([info.sg_id for info in sg_list])
-            prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
-
-            html_key = f'{participant_id}_html'
-            relative_path = str(outputs[html_key]).split('/', 3)[3]
-            out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
-
             jobs = relate.identity_check_jobs(
                 participant_id=participant_id,
+                outputs=outputs,
                 somalier_paths=somalier_paths,
-                output_prefix=prefix,
                 dataset_name=dataset.name,
-                out_html_url=out_html_url,
-                web_html_path=outputs[html_key],
                 job_attrs={'participant': participant_id},
             )
             all_jobs.extend(jobs)
@@ -163,6 +149,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'expected_ped': prefix / f'{dataset.name}.expected.ped',
             'html': to_path(f'{web_output_prefix}.html'),
             'checks': prefix / f'{dataset.name}-checks.done',
+            'output_prefix': str(output_prefix),
         }
 
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
@@ -175,22 +162,12 @@ class SomalierPedigreeCheck(stage.DatasetStage):
 
         # Build PED file content and write to GCS at orchestration time
         ped_content = build_ped_content(dataset.name, index)
-        ped_path = outputs['expected_ped']
-        with to_path(ped_path).open('w') as f:
+        with outputs['expected_ped'].open('w') as f:
             f.write(ped_content)
-
-        output_prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / dataset.name
-
-        access_level = config_retrieve(['workflow', 'access_level'])
-        subdomain = 'test-web' if access_level == 'test' else 'main-web'
-        relative_path = str(outputs['html']).split('/', 3)[3]
-        out_html_url = f'https://{subdomain}.populationgenomics.org.au/{dataset.name}/{relative_path}'
 
         jobs = relate.pedigree_check_jobs(
             somalier_paths=somalier_paths,
-            output_prefix=output_prefix,
             outputs=outputs,
-            out_html_url=out_html_url,
             dataset_name=dataset.name,
             label=f'{dataset.name} Somalier',
             job_attrs={},
