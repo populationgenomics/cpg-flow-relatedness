@@ -9,11 +9,9 @@ from cpg_utils import Path, config, hail_batch
 
 def identity_check_jobs(
     participant_id: str,
+    outputs: dict[str, Path | str],
     somalier_paths: dict[str, str | Path],
-    output_prefix: Path,
     dataset_name: str,
-    out_html_url: str,
-    web_html_path: Path,
     job_attrs: dict[str, str],
 ) -> list[BashJob]:
     """
@@ -46,12 +44,8 @@ def identity_check_jobs(
     )
     relate_j.command(f'somalier relate -o {relate_j.output} inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, output_prefix)
-    batch_instance.write_output(relate_j.html_out, str(web_html_path))
-
-    pairs_out = str(output_prefix) + '.pairs.tsv'
-    samples_out = str(output_prefix) + '.samples.tsv'
-    html_out = str(web_html_path)
+    batch_instance.write_output(relate_j.output, outputs[f'{participant_id}_prefix'])
+    batch_instance.write_output(relate_j.html_out, outputs[f'{participant_id}_html'])
 
     kinship_threshold = config.config_retrieve(
         ['somalier_self_check', 'kinship_threshold'],
@@ -66,6 +60,11 @@ def identity_check_jobs(
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
+    out_html_url = str(outputs[f'{participant_id}_html']).replace(
+        config.config_retrieve(['storage', dataset_name, 'web']),
+        config.config_retrieve(['storage', dataset_name, 'web_url']),
+    )
+
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
     --pairs-tsv {relate_j.output['pairs.tsv']} \\
@@ -73,9 +72,9 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     --dataset {dataset_name} \\
     --kinship-threshold {kinship_threshold} \\
     --sg-ids {sg_ids_str} \\
-    --output-pairs {pairs_out} \\
-    --output-samples {samples_out} \\
-    --output-html {html_out} \\
+    --output-pairs {outputs[f'{participant_id}_pairs_tsv']!s} \\
+    --output-samples {outputs[f'{participant_id}_samples_tsv']!s} \\
+    --output-html {outputs[f'{participant_id}_html']!s} \\
     --html-url {out_html_url}
 """)
 

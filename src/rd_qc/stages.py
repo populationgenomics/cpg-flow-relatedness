@@ -88,7 +88,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             tag = sg_ids_tag([info.sg_id for info in sg_list])
             prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
             web_prefix = web_output_prefix / participant_id / f'{tag}.somalier_identity_check'
-            outputs[f'{participant_id}_prefix'] = prefix
+            outputs[f'{participant_id}_prefix'] = str(prefix)
             outputs[f'{participant_id}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
             outputs[f'{participant_id}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
             outputs[f'{participant_id}_html'] = to_path(str(web_prefix) + '.html')
@@ -123,22 +123,11 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             if len(somalier_paths) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
-            tag = sg_ids_tag([info.sg_id for info in sg_list])
-
-            html_key = f'{participant_id}_html'
-
-            out_html_url = str(outputs[html_key]).replace(
-                config_retrieve(['storage', dataset.name, 'web']),
-                config_retrieve(['storage', dataset.name, 'web_url']),
-            )
-
             jobs = relate.identity_check_jobs(
                 participant_id=participant_id,
+                outputs=outputs,
                 somalier_paths=somalier_paths,
-                output_prefix=outputs[f'{participant_id}_prefix'],
                 dataset_name=dataset.name,
-                out_html_url=out_html_url,
-                web_html_path=outputs[html_key],
                 job_attrs={'participant': participant_id},
             )
             all_jobs.extend(jobs)
