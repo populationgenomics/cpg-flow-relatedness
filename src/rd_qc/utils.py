@@ -25,7 +25,7 @@ def get_gcs_object_size(fullpath: str, client: gcs.Client) -> int:
     bucket_name, filepath = fullpath.removeprefix('gs://').split('/', 1)
     blob = client.bucket(bucket_name).blob(filepath)
     blob.reload()
-    return max((blob_size // (1024**3), 10)) + buffer
+    return max((blob.size // (1024**3), 10)) + buffer
 
 
 SG_QUERY = gql("""
