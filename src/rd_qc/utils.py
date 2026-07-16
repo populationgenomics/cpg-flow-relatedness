@@ -13,16 +13,19 @@ from cpg_utils.config import config_retrieve
 from metamist.graphql import gql, query
 
 
-def get_gcs_object_size(fullpath: str, client: gcs.Client, buffer: int = 0) -> int:
+def get_gcs_object_size(fullpath: str, client: gcs.Client) -> int:
     """
-    Get exact object size in GCS in GB, plus optional buffer for intermediate files.
-    Returns 0 + buffer if the object is under 1GB.
+    Get exact object size in GCS in GB, plus buffer for intermediate files.
+    Returns 10 + buffer if the object is under 1GB.
     """
+    buffer = config_retrieve(
+        ['workflow', 'somalier_extract', 'storage_buffer'],
+        20,
+    )
     bucket_name, filepath = fullpath.removeprefix('gs://').split('/', 1)
     blob = client.bucket(bucket_name).blob(filepath)
     blob.reload()
-    size = blob.size // (1024**3)
-    return size + buffer
+    return max((blob.size // (1024**3), 10)) + buffer
 
 
 SG_QUERY = gql("""
@@ -53,6 +56,12 @@ ANALYSIS_QUERY = gql("""
                     outputs
                     type
                     meta
+                }
+                sample {
+                    externalId
+                    participant {
+                        externalId
+                    }
                 }
             }
         }
@@ -154,7 +163,7 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
 
 
 @cache
-def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> dict[str, str]:
+def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> tuple[dict[str, str], dict[str, dict]]:
     """
     For each SG ID, query metamist for available analyses and select the best
     source file for somalier extraction.
@@ -164,16 +173,21 @@ def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> dic
     resolved = get_metamist().get_metamist_proj(project)
     response = query(ANALYSIS_QUERY, variables={'project': resolved, 'sgIds': list(sgids)})
 
+    sg_id_map: dict[str, dict] = {}
     targets: dict[str, str] = {}
     for sg in response['project']['sequencingGroups']:
         sg_id = sg['id']
         best_file = _select_best_file_for_sg(sg.get('analyses', []))
         if best_file:
             targets[sg_id] = best_file
+            sg_id_map[sg_id] = {
+                'sample_external_id': sg['sample']['externalId'],
+                'participant_external_id': sg['sample']['participant']['externalId'],
+            }
         else:
             logger.warning(f'{sg_id}: no suitable file found for somalier extraction')
 
-    return targets
+    return targets, sg_id_map
 
 
 @cache

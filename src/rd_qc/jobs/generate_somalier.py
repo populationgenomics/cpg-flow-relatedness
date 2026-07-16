@@ -23,6 +23,7 @@ gcs_client = gcs.Client()
 def somalier_jobs(
     somalier_targets: dict[str, str],
     somalier_outputs: dict[str, Path],
+    sg_id_map: dict[str, dict],
     project: str,
 ) -> list[Job]:
     """
@@ -40,18 +41,15 @@ def somalier_jobs(
     jobs = []
     for sg_id, source_file in somalier_targets.items():
         output_path = somalier_outputs[sg_id]
-
+        sample_id = sg_id_map[sg_id]['sample_external_id']
+        participant_id = sg_id_map[sg_id]['participant_external_id']
         j = batch_instance.new_bash_job(
-            f'Somalier extract {sg_id}',
+            f'{project} Somalier extract {sg_id} | {sample_id} | {participant_id}',
             {'tool': 'somalier', 'sg': sg_id},
         )
         j.image(config.config_retrieve(['images', 'somalier']))
         try:
-            storage_gb = get_gcs_object_size(
-                source_file,
-                gcs_client,
-                buffer=config.config_retrieve(['somalier_extract', 'storage_buffer'], 20),
-            )
+            storage_gb = get_gcs_object_size(source_file, gcs_client)
         except NotFound:
             storage_gb = 50
         j.storage(f'{storage_gb}GiB')
