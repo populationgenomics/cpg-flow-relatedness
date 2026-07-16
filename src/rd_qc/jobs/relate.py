@@ -84,7 +84,6 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
     outputs: dict[str, Path],
-    out_html_url: str,
     dataset_name: str,
     label: str,
     job_attrs: dict[str, str],
@@ -132,6 +131,11 @@ def pedigree_check_jobs(
     check_j = batch_instance.new_bash_job(title, job_attrs)
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
+
+    out_html_url = str(outputs['html']).replace(
+        config_retrieve(['storage', dataset_name, 'web']),
+        config_retrieve(['storage', dataset_name, 'web_url']),
+    )
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\

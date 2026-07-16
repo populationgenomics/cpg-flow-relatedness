@@ -166,15 +166,9 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         with outputs['expected_ped'].open('w') as f:
             f.write(ped_content)
 
-        out_html_url = str(outputs['html']).replace(
-            config_retrieve(['storage', dataset.name, 'web']),
-            config_retrieve(['storage', dataset.name, 'web_url']),
-        )
-
         jobs = relate.pedigree_check_jobs(
             somalier_paths=somalier_paths,
             outputs=outputs,
-            out_html_url=out_html_url,
             dataset_name=dataset.name,
             label=f'{dataset.name} Somalier',
             job_attrs={},
