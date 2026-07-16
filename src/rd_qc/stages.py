@@ -37,7 +37,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         relevant = _relevant_sg_ids(dataset, index)
         missing_sgids = find_sgids_without_somalier(index) & relevant
         if missing_sgids:
-            extract_targets = select_somalier_extract_targets(
+            extract_targets, _ = select_somalier_extract_targets(
                 dataset.name,
                 tuple(sorted(missing_sgids)),
             )
@@ -55,7 +55,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         if not missing_sgids:
             return self.make_outputs(dataset, data=outputs)
 
-        extract_targets = select_somalier_extract_targets(
+        extract_targets, sg_id_map = select_somalier_extract_targets(
             dataset.name,
             tuple(sorted(missing_sgids)),
         )
@@ -66,6 +66,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         jobs = generate_somalier.somalier_jobs(
             somalier_targets=extract_targets,
             somalier_outputs=somalier_outputs,
+            sg_id_map=sg_id_map,
             project=dataset.name,
         )
 

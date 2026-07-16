@@ -57,6 +57,12 @@ ANALYSIS_QUERY = gql("""
                     type
                     meta
                 }
+                sample {
+                    externalId
+                    participant {
+                        externalId
+                    }
+                }
             }
         }
     }
@@ -157,7 +163,7 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
 
 
 @cache
-def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> dict[str, str]:
+def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> tuple[dict[str, str], dict[str, dict]]:
     """
     For each SG ID, query metamist for available analyses and select the best
     source file for somalier extraction.
@@ -167,16 +173,21 @@ def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> dic
     resolved = get_metamist().get_metamist_proj(project)
     response = query(ANALYSIS_QUERY, variables={'project': resolved, 'sgIds': list(sgids)})
 
+    sg_id_map: dict[str, dict] = {}
     targets: dict[str, str] = {}
     for sg in response['project']['sequencingGroups']:
         sg_id = sg['id']
         best_file = _select_best_file_for_sg(sg.get('analyses', []))
         if best_file:
             targets[sg_id] = best_file
+            sg_id_map[sg_id] = {
+                'sample_external_id': sg['sample']['externalId'],
+                'participant_external_id': sg['sample']['participant']['externalId'],
+            }
         else:
             logger.warning(f'{sg_id}: no suitable file found for somalier extraction')
 
-    return targets
+    return targets, sg_id_map
 
 
 @cache
