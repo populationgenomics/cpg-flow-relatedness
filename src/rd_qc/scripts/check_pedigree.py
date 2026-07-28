@@ -240,21 +240,25 @@ def run(
     all_issues = mismatching_unrelated_to_related + mismatching_related_to_unrelated
 
     for sg_id in sg_ids:
-        sg_meta = {
-            'check': 'pedigree',
+        sg_issues = [issue for issue in all_issues if sg_id in issue]
+        if not sg_issues and sg_id not in sex_mismatch_ids:
+            info(f'✅ No issues found for {sg_id}')
+            continue
+
+        meta = {
+            'stage': 'SomalierPedigreeCheck',
             'sex_match': sg_id not in sex_mismatch_ids,
-            'relatedness_issues': [issue.replace('"', '') for issue in all_issues if sg_id in issue],
+            'relatedness_issues': [issue.replace('"', '') for issue in sg_issues],
         }
-        # Maybe skip this if there are no issues?
         create_new(
             project=dataset,
             output=output_pairs,
             analysis_type='somalier_relate',
             sgs=[sg_id],
-            meta=sg_meta,
+            meta=meta,
             secondary={'samples': output_samples, 'html': output_html},
         )
-    logger.info(f'Registered somalier_relate analyses for {len(sg_ids)} SGs')
+        logger.info(f'Registered somalier_relate analysis for {sg_id}')
     # Now create the web analysis for the whole dataset
     create_new(
         project=dataset,
@@ -264,6 +268,7 @@ def run(
         meta={'stage': 'SomalierPedigreeCheck'},
         secondary={'base_html_url': base_html_url, 'samples': output_samples, 'pairs': output_pairs},
     )
+    logger.info(f'Registered web analysis for {dataset} at {html_url}')
 
 
 def print_contents(
