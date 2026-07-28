@@ -188,7 +188,7 @@ def run(
     output_samples: str,
     output_html: str,
     html_url: str,
-    base_html_url: str,
+    base_output_html: str,
     dataset: str,
 ):
     """Report pedigree inconsistencies, given somalier outputs."""
@@ -266,7 +266,7 @@ def run(
         analysis_type='web',
         sgs=sg_ids,
         meta={'stage': 'SomalierPedigreeCheck'},
-        secondary={'base_html_url': base_html_url, 'samples': output_samples, 'pairs': output_pairs},
+        secondary={'base_html': base_output_html, 'samples': output_samples, 'pairs': output_pairs},
     )
     logger.info(f'Registered web analysis for {dataset} at {html_url}')
 
@@ -313,24 +313,24 @@ if __name__ == '__main__':
         help='Path to PED file with expected pedigree',
     )
     parser.add_argument('--title', required=True, help='Report title')
-    parser.add_argument('--html-url', help='Somalier HTML URL (namespaced by AR GUID)')
-    parser.add_argument('--base-html-url', help='Somalier HTML URL (fixed path, not namespaced)')
+    parser.add_argument('--html-url', help='Somalier HTML URL HTTPS path (namespaced by AR GUID)')
     parser.add_argument('--dataset', help='Dataset name')
     parser.add_argument('--sg-ids', required=True, help='Comma-separated SG IDs')
     parser.add_argument('--output-pairs', required=True)
     parser.add_argument('--output-samples', required=True)
-    parser.add_argument('--output-html', required=True)
+    parser.add_argument('--output-html', required=True, help='Somalier HTML gs:// path (namespaced by AR GUID)')
+    parser.add_argument('--base-output-html', required=True, help='HTML gs:// path (fixed, not namespaced)')
     args = parser.parse_args()
     run(
         somalier_samples_fpath=args.somalier_samples,
         somalier_pairs_fpath=args.somalier_pairs,
         expected_ped_fpath=args.ped,
         html_url=args.html_url,
-        base_html_url=args.base_html_url,
         dataset=args.dataset,
         title=args.title,
         sg_ids=args.sg_ids.split(','),
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,
         output_html=args.output_html,
+        base_html_url=args.base_output_html,
     )
