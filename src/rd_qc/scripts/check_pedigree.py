@@ -49,8 +49,8 @@ def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel
         line += s2 + (f' ({fam2})' if fam2 and fam2 != s2 else '')
     return (
         f'{line}, '
-        f'provided: {expected_rel}, '
-        f'inferred: {inferred_rel}, '
+        f'provided: "{expected_rel}", '
+        f'inferred: "{inferred_rel}", '
         f'kin={row["relatedness"]}, '
         f'ibs0={row["ibs0"]}, '
         f'ibs2={row["ibs2"]}'
@@ -243,7 +243,7 @@ def run(
         sg_meta = {
             'check': 'pedigree',
             'sex_match': sg_id not in sex_mismatch_ids,
-            'relatedness_issues': [issue for issue in all_issues if sg_id in issue],
+            'relatedness_issues': [issue.replace('"', '') for issue in all_issues if sg_id in issue],
         }
         # Maybe skip this if there are no issues?
         create_new(
