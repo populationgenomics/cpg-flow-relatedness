@@ -11,7 +11,7 @@ from rd_qc.utils import (
 )
 
 from cpg_flow import stage, targets
-from cpg_utils import Path, to_path
+from cpg_utils import Path, config, to_path
 from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
@@ -138,10 +138,22 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class SomalierPedigreeCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
-        prefix = dataset.prefix() / 'somalier_checks' / 'pedigree'
-        web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'
+        """
+        Expected outputs for the somalier pedigree check stage.
 
+        Files are written to paths namespaced by the AR GUID to avoid collisions between runs of the workflow.
+
+        The final HTML report is written to both a path with and without namespacing, so that it is updated
+        with each run, whilst also preserving the previous run's report for reference.
+        """
+        ar_guid = config.config_retrieve(['workflow', 'ar-guid'])
+        prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / ar_guid
         output_prefix = prefix / dataset.name
+
+        base_web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'
+        base_web_output_prefix = base_web_prefix / dataset.name
+
+        web_prefix = base_web_prefix / ar_guid
         web_output_prefix = web_prefix / dataset.name
 
         return {
@@ -149,6 +161,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'pairs': to_path(f'{output_prefix}.pairs.tsv'),
             'expected_ped': prefix / f'{dataset.name}.expected.ped',
             'html': to_path(f'{web_output_prefix}.html'),
+            'base_html_url': to_path(f'{base_web_output_prefix}.html'),
             'checks': prefix / f'{dataset.name}-checks.done',
             'output_prefix': str(output_prefix),
         }

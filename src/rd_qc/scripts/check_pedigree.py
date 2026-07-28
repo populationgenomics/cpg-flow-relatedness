@@ -49,8 +49,8 @@ def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel
         line += s2 + (f' ({fam2})' if fam2 and fam2 != s2 else '')
     return (
         f'{line}, '
-        f'provided: "{expected_rel}", '
-        f'inferred: "{inferred_rel}", '
+        f'provided: {expected_rel}, '
+        f'inferred: {inferred_rel}, '
         f'kin={row["relatedness"]}, '
         f'ibs0={row["ibs0"]}, '
         f'ibs2={row["ibs2"]}'
@@ -188,6 +188,7 @@ def run(
     output_samples: str,
     output_html: str,
     html_url: str,
+    base_html_url: str,
     dataset: str,
 ):
     """Report pedigree inconsistencies, given somalier outputs."""
@@ -244,6 +245,7 @@ def run(
             'sex_match': sg_id not in sex_mismatch_ids,
             'relatedness_issues': [issue for issue in all_issues if sg_id in issue],
         }
+        # Maybe skip this if there are no issues?
         create_new(
             project=dataset,
             output=output_pairs,
@@ -253,6 +255,15 @@ def run(
             secondary={'samples': output_samples, 'html': output_html},
         )
     logger.info(f'Registered somalier_relate analyses for {len(sg_ids)} SGs')
+    # Now create the web analysis for the whole dataset
+    create_new(
+        project=dataset,
+        output=html_url,
+        analysis_type='web',
+        sgs=sg_ids,
+        meta={'stage': 'SomalierPedigreeCheck'},
+        secondary={'base_html_url': base_html_url, 'samples': output_samples, 'pairs': output_pairs},
+    )
 
 
 def print_contents(
@@ -297,7 +308,8 @@ if __name__ == '__main__':
         help='Path to PED file with expected pedigree',
     )
     parser.add_argument('--title', required=True, help='Report title')
-    parser.add_argument('--html-url', help='Somalier HTML URL')
+    parser.add_argument('--html-url', help='Somalier HTML URL (namespaced by AR GUID)')
+    parser.add_argument('--base-html-url', help='Somalier HTML URL (fixed path, not namespaced)')
     parser.add_argument('--dataset', help='Dataset name')
     parser.add_argument('--sg-ids', required=True, help='Comma-separated SG IDs')
     parser.add_argument('--output-pairs', required=True)
@@ -309,6 +321,7 @@ if __name__ == '__main__':
         somalier_pairs_fpath=args.somalier_pairs,
         expected_ped_fpath=args.ped,
         html_url=args.html_url,
+        base_html_url=args.base_html_url,
         dataset=args.dataset,
         title=args.title,
         sg_ids=args.sg_ids.split(','),
