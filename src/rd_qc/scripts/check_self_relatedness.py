@@ -20,6 +20,32 @@ from cpg_utils import config, slack, to_path
 from cpg_utils.metamist_registration import create_new
 
 
+def write_result_json(
+    dataset: str,
+    participant_external_id: str,
+    relatedness_threshold: float,
+    html_url: str | None,
+    low_relatedness_pairs: list[dict[str, Any]],
+    flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]],
+    output_json: str | None = None,
+):
+    """
+    Write a JSON file with the self-relatedness check results.
+    """
+    result: dict[str, Any] = {
+        'dataset': dataset,
+        'participant_external_id': participant_external_id,
+        'relatedness_threshold': relatedness_threshold,
+        'html_url': html_url,
+        'n_flags': len(low_relatedness_pairs),
+        'self_relatedness_flags': {sg_id: [asdict(flag) for flag in flags] for sg_id, flags in flags_by_sg_id.items()},
+    }
+
+    if output_json:
+        with to_path(output_json).open('w') as f:
+            json.dump(result, f, indent=2)
+
+
 def run(
     pairs_fpath: str,
     participant_external_id: str,
@@ -67,6 +93,15 @@ def run(
     if passed:
         # All pairs have relatedness above the threshold, exit early
         logger.info(f'{participant_external_id}: All pairs have relatedness >= {relatedness_threshold}')
+        write_result_json(
+            dataset=dataset,
+            participant_external_id=participant_external_id,
+            relatedness_threshold=relatedness_threshold,
+            html_url=html_url,
+            low_relatedness_pairs=[],
+            flags_by_sg_id={},
+            output_json=output_json,
+        )
         return
 
     flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]] = {}
@@ -110,18 +145,15 @@ def run(
     ):
         slack.send_message(text)
 
-    result: dict[str, Any] = {
-        'dataset': dataset,
-        'participant_external_id': participant_external_id,
-        'relatedness_threshold': relatedness_threshold,
-        'html_url': html_url,
-        'n_flags': len(low_relatedness_pairs),
-        'self_relatedness_flags': {sg_id: [asdict(flag) for flag in flags] for sg_id, flags in flags_by_sg_id.items()},
-    }
-
-    if output_json:
-        with to_path(output_json).open('w') as f:
-            json.dump(result, f, indent=2)
+    write_result_json(
+        dataset=dataset,
+        participant_external_id=participant_external_id,
+        relatedness_threshold=relatedness_threshold,
+        html_url=html_url,
+        low_relatedness_pairs=low_relatedness_pairs,
+        flags_by_sg_id=flags_by_sg_id,
+        output_json=output_json,
+    )
 
     # Register results in metamist
     meta = {
