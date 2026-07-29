@@ -142,6 +142,7 @@ def pedigree_check_jobs(
         config.config_retrieve(['storage', dataset_name, 'web']),
         config.config_retrieve(['storage', dataset_name, 'web_url']),
     )
+    dataset_name = config.dataset_for_access_level(dataset_name)
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\

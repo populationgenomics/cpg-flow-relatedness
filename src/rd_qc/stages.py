@@ -191,7 +191,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             somalier_self_relatedness_json_paths=somalier_self_relatedness_json_paths,
             outputs=outputs,
             tmp_prefix=dataset.tmp_prefix() / 'somalier_checks' / 'pedigree',
-            dataset_name=config.dataset_for_access_level(dataset.name),
+            dataset_name=dataset.name,
             label=f'{dataset.name} Somalier',
             job_attrs={},
         )
