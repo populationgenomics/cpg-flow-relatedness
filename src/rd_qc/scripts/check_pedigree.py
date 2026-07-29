@@ -288,7 +288,7 @@ def run(
         'dataset': dataset,
         'html_url': html_url,
         'n_samples_flagged': len([flags for flags in all_flags_by_sg_id.values() if flags]),
-        'qc_flags': {sg_id: [asdict(flag) for flag in flags] for sg_id, flags in all_flags_by_sg_id.items()},
+        'relatedness_flags': {sg_id: [asdict(flag) for flag in flags] for sg_id, flags in all_flags_by_sg_id.items()},
     }
     if output_json:
         with to_path(output_json).open('w') as f:
