@@ -203,6 +203,7 @@ def record_somalier_flags_job(
     somalier_relatedness_json = batch_instance.read_input(somalier_relatedness_json)
 
     cmd = f"""\
+    mkdir -p inputs/
     cat {somalier_self_relatedness_jsons} | gcloud storage cp -I inputs/
 
     python3 -m rd_qc.scripts.record_somalier_flags \\
