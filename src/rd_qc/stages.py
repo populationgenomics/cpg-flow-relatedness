@@ -69,7 +69,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
             somalier_targets=extract_targets,
             somalier_outputs=somalier_outputs,
             sg_id_map=sg_id_map,
-            project=dataset.name,
+            project=config.dataset_for_access_level(dataset.name),
         )
 
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
@@ -130,7 +130,7 @@ class SomalierSelfCheck(stage.DatasetStage):
                 participant_id=participant_id,
                 outputs=outputs,
                 somalier_paths=somalier_paths,
-                dataset_name=dataset.name,
+                dataset_name=config.dataset_for_access_level(dataset.name),
                 job_attrs={'participant': participant_id},
             )
             all_jobs.extend(jobs)
@@ -191,7 +191,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             somalier_self_relatedness_json_paths=somalier_self_relatedness_json_paths,
             outputs=outputs,
             tmp_prefix=dataset.tmp_prefix() / 'somalier_checks' / 'pedigree',
-            dataset_name=dataset.name,
+            dataset_name=config.dataset_for_access_level(dataset.name),
             label=f'{dataset.name} Somalier',
             job_attrs={},
         )
