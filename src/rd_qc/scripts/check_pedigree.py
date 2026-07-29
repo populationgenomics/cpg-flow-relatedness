@@ -294,6 +294,11 @@ def run(
         with to_path(output_json).open('w') as f:
             json.dump(result, f, indent=2)
 
+    with to_path(output_samples).open('w') as f:
+        f.write(to_path(somalier_samples_fpath).read_text())
+    with to_path(output_pairs).open('w') as f:
+        f.write(to_path(somalier_pairs_fpath).read_text())
+
     # Now create the web analysis for the whole dataset
     create_new(
         project=dataset,
