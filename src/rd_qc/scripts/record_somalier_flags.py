@@ -315,35 +315,34 @@ def reconcile_sg_somalier_flags(
     final_flags: list[SomalierSexInferenceFlag | SomalierSelfRelatednessFlag | SomalierRelatednessFlag] = []
     stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
 
-    if current_somalier_flags:
-        logger.info(f'{sg_id} :: Found {len(current_somalier_flags)} existing {report} flags. Reconciling.')
-        if new_somalier_sex_inference_flags_by_key:
-            sex_stats, sex_final_flags = reconcile_sg_somalier_sex_inference_flags(
-                sg,
-                new_somalier_sex_inference_flags_by_key,
-                current_somalier_flags,
-                today,
-            )
-            stats = {k: stats[k] + sex_stats.get(k, 0) for k in stats}
-            final_flags.extend(sex_final_flags)
-        if new_somalier_self_relatedness_flags_by_key:
-            self_relatedness_stats, self_relatedness_final_flags = reconcile_sg_somalier_self_relatedness_flags(
-                sg,
-                new_somalier_self_relatedness_flags_by_key,
-                current_somalier_flags,
-                today,
-            )
-            stats = {k: stats[k] + self_relatedness_stats.get(k, 0) for k in stats}
-            final_flags.extend(self_relatedness_final_flags)
-        if new_somalier_relatedness_flags_by_key:
-            relatedness_stats, relatedness_final_flags = reconcile_sg_somalier_relatedness_flags(
-                sg,
-                new_somalier_relatedness_flags_by_key,
-                current_somalier_flags,
-                today,
-            )
-            stats = {k: stats[k] + relatedness_stats.get(k, 0) for k in stats}
-            final_flags.extend(relatedness_final_flags)
+    logger.info(f'{sg_id} :: Found {len(current_somalier_flags)} existing {report} flags. Reconciling.')
+    if new_somalier_sex_inference_flags_by_key:
+        sex_stats, sex_final_flags = reconcile_sg_somalier_sex_inference_flags(
+            sg,
+            new_somalier_sex_inference_flags_by_key,
+            current_somalier_flags,
+            today,
+        )
+        stats = {k: stats[k] + sex_stats.get(k, 0) for k in stats}
+        final_flags.extend(sex_final_flags)
+    if new_somalier_self_relatedness_flags_by_key:
+        self_relatedness_stats, self_relatedness_final_flags = reconcile_sg_somalier_self_relatedness_flags(
+            sg,
+            new_somalier_self_relatedness_flags_by_key,
+            current_somalier_flags,
+            today,
+        )
+        stats = {k: stats[k] + self_relatedness_stats.get(k, 0) for k in stats}
+        final_flags.extend(self_relatedness_final_flags)
+    if new_somalier_relatedness_flags_by_key:
+        relatedness_stats, relatedness_final_flags = reconcile_sg_somalier_relatedness_flags(
+            sg,
+            new_somalier_relatedness_flags_by_key,
+            current_somalier_flags,
+            today,
+        )
+        stats = {k: stats[k] + relatedness_stats.get(k, 0) for k in stats}
+        final_flags.extend(relatedness_final_flags)
 
     # Perform the mutation to update the SG meta
     query(
