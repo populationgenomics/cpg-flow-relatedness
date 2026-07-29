@@ -138,7 +138,7 @@ class SomalierSelfCheck(stage.DatasetStage):
         return self.make_outputs(dataset, data=outputs, jobs=all_jobs)
 
 
-@stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
+@stage.stage(required_stages=[GenerateMissingSomalierFingerprints, SomalierSelfCheck])
 class SomalierPedigreeCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         """
