@@ -2,7 +2,6 @@
 Jobs for somalier relate — used by both identity checks and pedigree checks.
 """
 
-from hailtop.batch import ResourceFile
 from hailtop.batch.job import BashJob
 
 from cpg_utils import Path, config, hail_batch
@@ -168,7 +167,7 @@ touch {check_j.output}
         tmp_prefix=tmp_prefix,
         sg_ids=sg_ids_str,
         somalier_self_relatedness_json_paths=somalier_self_relatedness_json_paths,
-        somalier_relatedness_json=check_j.output['json'],
+        somalier_relatedness_json=str(outputs['json']),
         job_attrs=job_attrs,
     )
     record_j.depends_on(check_j)
@@ -181,7 +180,7 @@ def record_somalier_flags_job(
     tmp_prefix: Path,
     sg_ids: str,
     somalier_self_relatedness_json_paths: list[Path | str],
-    somalier_relatedness_json: ResourceFile,
+    somalier_relatedness_json: str,
     job_attrs: dict | None = None,
 ) -> BashJob:
     """
@@ -200,7 +199,8 @@ def record_somalier_flags_job(
         f.writelines([f'{p}\n' for p in somalier_self_relatedness_json_paths])
 
     somalier_self_relatedness_jsons = batch_instance.read_input(file_list_path)
-    somalier_relatedness_json = batch_instance.read_input(str(somalier_relatedness_json))
+
+    somalier_relatedness_json = batch_instance.read_input(somalier_relatedness_json)
 
     cmd = f"""\
     mkdir inputs
