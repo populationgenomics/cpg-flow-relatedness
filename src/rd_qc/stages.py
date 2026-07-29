@@ -20,7 +20,9 @@ _MIN_SGS_FOR_IDENTITY_CHECK = 2
 def _relevant_sg_ids(dataset: targets.Dataset, index: SomalierIndex) -> set[str]:
     """SG IDs for participants who have at least one SG in the cohort."""
     cohort_sg_ids = {sg.id for sg in dataset.get_sequencing_groups()}
-    cohort_participants = {index.by_sg[sg_id].participant_id for sg_id in cohort_sg_ids if sg_id in index.by_sg}
+    cohort_participants = {
+        index.by_sg[sg_id].participant_external_id for sg_id in cohort_sg_ids if sg_id in index.by_sg
+    }
     return {info.sg_id for pid in cohort_participants for info in index.by_participant[pid]}
 
 
@@ -74,7 +76,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
 
 
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
-class RunCrossTypeIdentityChecks(stage.DatasetStage):
+class SomalierSelfCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         index = get_project_sgs_and_fingerprints(dataset.name)
         output_prefix = dataset.prefix() / 'identity_checks'
@@ -92,6 +94,7 @@ class RunCrossTypeIdentityChecks(stage.DatasetStage):
             outputs[f'{participant_id}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
             outputs[f'{participant_id}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
             outputs[f'{participant_id}_html'] = to_path(str(web_prefix) + '.html')
+            outputs[f'{participant_id}_json'] = to_path(str(prefix) + '.checks.json')
 
         return outputs
 
@@ -164,6 +167,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'base_html_url': to_path(f'{base_web_output_prefix}.html'),
             'checks': prefix / f'{dataset.name}-checks.done',
             'output_prefix': str(output_prefix),
+            'json': to_path(f'{output_prefix}.checks.json'),
         }
 
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:

@@ -2,14 +2,15 @@
 suggested location for any utility methods or constants used across multiple stages
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import cache
 
 from google.cloud import storage as gcs
 from loguru import logger
 
 from cpg_flow.metamist import get_metamist
-from cpg_utils.config import config_retrieve
+from cpg_utils.config import config_retrieve, try_get_ar_guid
 from metamist.graphql import gql, query
 
 
@@ -82,8 +83,60 @@ class SgSomalierInfo:
     """Somalier fingerprint state for a single sequencing group."""
 
     sg_id: str
-    participant_id: str
+    participant_external_id: str
     somalier_path: str | None
+
+
+@dataclass(kw_only=True)
+class SomalierFlag:
+    """Generic flag class for somalier QC checks."""
+
+    category: str | None = None
+    date: str = field(default_factory=lambda: datetime.now(tz=UTC).isoformat(timespec='seconds'))
+    ar_guid: str = field(default_factory=try_get_ar_guid)
+    resolved: bool = False
+    resolution_date: str | None = None
+
+
+@dataclass(kw_only=True)
+class SomalierSexInferenceFlag(SomalierFlag):
+    """Somalier sex inference mismatch flag."""
+
+    provided: str
+    inferred: str
+    mean_depth: float
+    x_het_ratio: float  # the actual decision statistic
+    x_depth_ratio: float  # ~1 XY, ~2 XX
+    y_depth_ratio: float  # ~1 XY, ~0 YY
+    x_sites: int  # <10 => no call attempted
+    p_middling_ab: float  # >=0.06 => inference skipped
+
+
+@dataclass(kw_only=True)
+class SomalierSelfRelatednessFlag(SomalierFlag):
+    """Somalier self-relatedness mismatch flag."""
+
+    sg_id_1: str
+    sg_id_2: str
+    participant_external_id: str
+    threshold: float
+    relatedness: float
+    ibs0: int
+    ibs2: int
+
+
+@dataclass(kw_only=True)
+class SomalierRelatednessFlag(SomalierFlag):
+    """Somalier relatedness mismatch flag."""
+
+    sg_id_1: str
+    sg_id_2: str
+    family_external_id: str
+    expected_relationship: str
+    inferred_relationship: str
+    relatedness: float
+    ibs0: int
+    ibs2: int
 
 
 class SomalierIndex:
@@ -93,7 +146,7 @@ class SomalierIndex:
         self.by_participant: dict[str, list[SgSomalierInfo]] = {}
         self.by_sg: dict[str, SgSomalierInfo] = {}
         for info in entries:
-            self.by_participant.setdefault(info.participant_id, []).append(info)
+            self.by_participant.setdefault(info.participant_external_id, []).append(info)
             self.by_sg[info.sg_id] = info
 
 
@@ -118,10 +171,10 @@ def get_project_sgs_and_fingerprints(project: str) -> SomalierIndex:
     entries = []
     for sg in raw_sgs:
         sg_id = sg['id']
-        participant_id = sg['sample']['participant']['externalId']
+        participant_external_id = sg['sample']['participant']['externalId']
         analyses = sg.get('analyses', [])
         somalier_path = analyses[0]['outputs'].get('path') if analyses else None
-        entries.append(SgSomalierInfo(sg_id=sg_id, participant_id=participant_id, somalier_path=somalier_path))
+        entries.append(SgSomalierInfo(sg_id, participant_external_id, somalier_path))
 
     return SomalierIndex(entries)
 
@@ -226,7 +279,7 @@ def build_ped_content(
     # Build reverse mapping: participant_external_id -> [sg_id, ...]
     participant_to_sgs: dict[str, list[str]] = {}
     for info in index.by_sg.values():
-        participant_to_sgs.setdefault(info.participant_id, []).append(info.sg_id)
+        participant_to_sgs.setdefault(info.participant_external_id, []).append(info.sg_id)
 
     # For ID substitution in paternal/maternal fields, pick first SG per participant
     participant_to_primary_sg: dict[str, str] = {}
