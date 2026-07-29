@@ -1,9 +1,9 @@
 import json
 import os
+from argparse import ArgumentParser
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-import click
 from loguru import logger
 
 from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
@@ -361,27 +361,6 @@ def reconcile_sg_somalier_flags(
     )
 
 
-@click.command()
-@click.option('--dataset', required=True, help='Dataset name')
-@click.option(
-    '--somalier-self-relatedness-json-dir',
-    'somalier_self_relatedness_json_dir',
-    required=True,
-    help='Path to the directory containing the somalier self-relatedness JSON files',
-)
-@click.option(
-    '--somalier-relatedness-json',
-    'somalier_relatedness_json_path',
-    required=True,
-    help='Path to the somalier relatedness JSON file',
-)
-@click.option(
-    '--sequencing-group-ids',
-    'sg_ids',
-    nargs='+',
-    required=True,
-    help='Space-separated sequencing group IDs',
-)
 def main(
     dataset: str,
     somalier_self_relatedness_json_dir: str,
@@ -428,4 +407,27 @@ def main(
 
 
 if __name__ == '__main__':
-    main()  # pylint: disable=E1120
+    parser = ArgumentParser()
+    parser.add_argument(
+        '--dataset',
+        required=True,
+        help='Dataset name',
+    )
+    parser.add_argument(
+        '--somalier-self-relatedness-json-dir',
+        required=True,
+        help='Path to directory containing somalier self-relatedness JSON files',
+    )
+    parser.add_argument(
+        '--somalier-relatedness-json-path',
+        required=True,
+        help='Path to somalier relatedness JSON file',
+    )
+    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
+    args = parser.parse_args()
+    main(
+        dataset=args.dataset,
+        somalier_self_relatedness_json_dir=args.somalier_self_relatedness_json_dir,
+        somalier_relatedness_json_path=args.somalier_relatedness_json_path,
+        sg_ids=args.sg_ids,
+    )
