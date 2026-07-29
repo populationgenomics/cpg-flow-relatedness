@@ -125,7 +125,7 @@ def pedigree_check_jobs(
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, outputs['output_prefix'])
+    batch_instance.write_output(relate_j.output, str(outputs['samples'].parent))
     # First copy of the HTML report written to a uniquely namespaced URL based on this run's AR GUID
     batch_instance.write_output(relate_j.html_out, str(outputs['html']))
     # Second copy of the HTML report written to the fixed URL
