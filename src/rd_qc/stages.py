@@ -149,7 +149,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         The final HTML report is written to both a path with and without namespacing, so that it is updated
         with each run, whilst also preserving the previous run's report for reference.
         """
-        ar_guid = config.config_retrieve(['workflow', 'ar-guid'])
+        ar_guid: str = config.config_retrieve(['workflow', 'ar-guid'])
         prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / ar_guid
         output_prefix = prefix / dataset.name
 
@@ -166,7 +166,6 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'html': to_path(f'{web_output_prefix}.html'),
             'base_html_url': to_path(f'{base_web_output_prefix}.html'),
             'checks': prefix / f'{dataset.name}-checks.done',
-            'output_prefix': str(output_prefix),
             'json': to_path(f'{output_prefix}.checks.json'),
         }
 
@@ -186,6 +185,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         jobs = relate.pedigree_check_jobs(
             somalier_paths=somalier_paths,
             outputs=outputs,
+            tmp_prefix=dataset.tmp_prefix() / 'somalier_checks' / 'pedigree',
             dataset_name=dataset.name,
             label=f'{dataset.name} Somalier',
             job_attrs={},

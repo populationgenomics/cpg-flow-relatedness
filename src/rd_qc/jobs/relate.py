@@ -86,6 +86,7 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
     outputs: dict[str, Path],
+    tmp_prefix: Path,
     dataset_name: str,
     label: str,
     job_attrs: dict[str, str],
@@ -163,7 +164,7 @@ touch {check_j.output}
 
     record_j = record_somalier_flags_job(
         dataset_name=dataset_name,
-        tmp_prefix=outputs['output_prefix'].parent,
+        tmp_prefix=tmp_prefix,
         sg_ids=sg_ids_str,
         somalier_self_relatedness_json_paths=[relate_j.output['pairs.tsv']],
         somalier_relatedness_json=relate_j.output['pairs.tsv'],
