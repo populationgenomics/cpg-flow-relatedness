@@ -33,7 +33,7 @@ def identity_check_jobs(
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
-        somalier_file = batch_instance.read_input(str(somalier_path))
+        somalier_file = batch_instance.read_input(somalier_path)
         relate_j.command(f'mv {somalier_file} inputs/{sg_id}.somalier')
 
     relate_j.declare_resource_group(
@@ -107,10 +107,10 @@ def pedigree_check_jobs(
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
-        somalier_file = batch_instance.read_input(str(somalier_path))
+        somalier_file = batch_instance.read_input(somalier_path)
         relate_j.command(f'mv {somalier_file} inputs/{sg_id}.somalier')
 
-    ped_input = batch_instance.read_input(str(ped_path))
+    ped_input = batch_instance.read_input(ped_path)
 
     relate_j.declare_resource_group(
         output={
@@ -120,11 +120,11 @@ def pedigree_check_jobs(
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, str(outputs['samples'].parent))
+    batch_instance.write_output(relate_j.output, outputs['samples'].parent)
     # First copy of the HTML report written to a uniquely namespaced URL based on this run's AR GUID
-    batch_instance.write_output(relate_j.html_out, str(outputs['html']))
+    batch_instance.write_output(relate_j.html_out, outputs['html'])
     # Second copy of the HTML report written to the fixed URL
-    batch_instance.write_output(relate_j.html_out, str(outputs['base_html_url']))
+    batch_instance.write_output(relate_j.html_out, outputs['base_html_url'])
 
     sg_ids_str = ' '.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'
@@ -156,7 +156,7 @@ python3 -m rd_qc.scripts.check_pedigree \\
 touch {check_j.output}
 """
     check_j.command(cmd)
-    batch_instance.write_output(check_j.output, str(outputs['checks']))
+    batch_instance.write_output(check_j.output, outputs['checks'])
 
     record_j = record_somalier_flags_job(
         dataset_name=dataset_name,
