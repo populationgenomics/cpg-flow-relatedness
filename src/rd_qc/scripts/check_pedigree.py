@@ -19,7 +19,7 @@ import pandas as pd
 from loguru import logger
 from peddy import Ped, Sample
 
-from rd_qc.utils import SomalierRelatednessFlag, SomalierSexInferenceFlag
+from rd_qc.utils import SomalierFlag, SomalierRelatednessFlag, SomalierSexInferenceFlag
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
@@ -281,7 +281,7 @@ def run(
     if config.config_retrieve(['somalier_pedigree', 'send_to_slack'], default=True):
         slack.send_message(text)
 
-    all_flags_by_sg_id: dict[str, list[SomalierSexInferenceFlag | SomalierRelatednessFlag]] = {}
+    all_flags_by_sg_id: dict[str, list[SomalierFlag]] = {}
     for sg_id, flag in sex_mismatches_by_sgid.items():
         all_flags_by_sg_id[sg_id] = [flag]
     for sg_id, flags in relatedness_flags_by_sg_id.items():
