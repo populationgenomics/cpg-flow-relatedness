@@ -4,7 +4,6 @@ Runs somalier extract on each input file and registers the result in metamist.
 """
 
 from google.api_core.exceptions import NotFound
-from google.cloud import storage as gcs
 from hailtop.batch.job import Job
 
 from rd_qc.utils import get_gcs_object_size
@@ -15,9 +14,6 @@ from cpg_utils import Path, config, hail_batch
 
 def register_analyses(output, analysis_type, cohort_ids, sg_ids, project_name, meta):
     complete_analysis_job(output, analysis_type, cohort_ids, sg_ids, project_name, meta)
-
-
-gcs_client = gcs.Client()
 
 
 def somalier_jobs(
@@ -49,7 +45,7 @@ def somalier_jobs(
         )
         j.image(config.config_retrieve(['images', 'somalier']))
         try:
-            storage_gb = get_gcs_object_size(source_file, gcs_client)
+            storage_gb = get_gcs_object_size(source_file)
         except NotFound:
             storage_gb = 50
         j.storage(f'{storage_gb}GiB')
