@@ -114,7 +114,7 @@ def reconcile_sg_somalier_sex_inference_flags(
                 stats['resolved'] += 1
             else:
                 # Already resolved and still absent: keep as-is
-                logger.info(f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' remains resolved.")
+                logger.debug(f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' remains resolved.")
         elif compare_somalier_sex_inference_flag(flag, new_somalier_sex_inference_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (provided/inferred) is unchanged so this counts as 'retained', not 'updated'.
@@ -178,7 +178,7 @@ def reconcile_sg_somalier_self_relatedness_flags(
                 stats['resolved'] += 1
             else:
                 # Already resolved and still absent: keep as-is
-                logger.info(f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' remains resolved.")
+                logger.debug(f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' remains resolved.")
         elif compare_somalier_self_relatedness_flag(flag, new_somalier_self_relatedness_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and
             # but keep resolution status. Identity (sg_id_1/sg_id_2/participant_external_id/threshold)
@@ -239,7 +239,7 @@ def reconcile_sg_somalier_relatedness_flags(
                 stats['resolved'] += 1
             else:
                 # Already resolved and still absent: keep as-is
-                logger.info(f"{sg_id} :: {report} flag '{flag['category']}' remains resolved.")
+                logger.debug(f"{sg_id} :: {report} flag '{flag['category']}' remains resolved.")
         elif compare_somalier_relatedness_flag(flag, new_somalier_relatedness_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (sg_id_1/sg_id_2/family_external_id/expected_relationship/inferred_relationship)  # noqa: ERA001
