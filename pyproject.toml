@@ -56,6 +56,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ['test']
+# Prefer the working tree over any installed copy of rd_qc in site-packages
+pythonpath = ['src']
 
 [tool.ruff]
 line-length = 120

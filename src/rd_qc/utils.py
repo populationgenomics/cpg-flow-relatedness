@@ -20,7 +20,7 @@ def get_gcs_object_size(fullpath: str, client: gcs.Client) -> int:
     Returns 10 + buffer if the object is under 1GB.
     """
     buffer = config_retrieve(
-        ['workflow', 'somalier_extract', 'storage_buffer'],
+        ['somalier_extract', 'storage_buffer'],
         20,
     )
     bucket_name, filepath = fullpath.removeprefix('gs://').split('/', 1)
