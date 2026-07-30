@@ -2,7 +2,6 @@
 
 from rd_qc.jobs import generate_somalier, relate
 from rd_qc.utils import (
-    SomalierIndex,
     build_ped_content,
     find_sgids_without_somalier,
     get_project_sgs_and_fingerprints,
@@ -17,13 +16,6 @@ from cpg_utils.existence_checks import exists
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
 
-def _relevant_sg_ids(dataset: targets.Dataset, index: SomalierIndex) -> set[str]:
-    """SG IDs for participants who have at least one SG in the cohort."""
-    cohort_sg_ids = {sg.id for sg in dataset.get_sequencing_groups()}
-    cohort_participants = {index.by_sg[sg_id].participant_id for sg_id in cohort_sg_ids if sg_id in index.by_sg}
-    return {info.sg_id for pid in cohort_participants for info in index.by_participant[pid]}
-
-
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
@@ -34,8 +26,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
             if info.somalier_path is not None:
                 outputs[info.sg_id] = to_path(info.somalier_path)
 
-        relevant = _relevant_sg_ids(dataset, index)
-        missing_sgids = find_sgids_without_somalier(index) & relevant
+        missing_sgids = find_sgids_without_somalier(index)
         if missing_sgids:
             extract_targets, _ = select_somalier_extract_targets(
                 dataset.name,
@@ -50,7 +41,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         outputs = self.expected_outputs(dataset)
 
         index = get_project_sgs_and_fingerprints(dataset.name)
-        missing_sgids = find_sgids_without_somalier(index) & _relevant_sg_ids(dataset, index)
+        missing_sgids = find_sgids_without_somalier(index)
 
         if not missing_sgids:
             return self.make_outputs(dataset, data=outputs)
