@@ -17,7 +17,7 @@ from typing import Any
 
 import pandas as pd
 from loguru import logger
-from peddy import Ped
+from peddy import Ped, Sample
 
 from rd_qc.utils import SomalierRelatednessFlag, SomalierSexInferenceFlag
 
@@ -154,8 +154,8 @@ def _check_relatedness(
     bad_ids: list,
 ) -> dict[str, list[SomalierRelatednessFlag]]:
     info('*Relatedness:*')
-    expected_ped_sample_by_id: dict[str, dict[str, str]] = {s.sample_id: s for s in expected_ped.samples()}
-    inferred_ped_sample_by_id: dict[str, dict[str, str]] = {s.sample_id: s for s in inferred_ped.samples()}
+    expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
+    inferred_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in inferred_ped.samples()}
 
     mismatching_unrelated_to_related = []
     mismatching_related_to_unrelated = []
@@ -183,7 +183,14 @@ def _check_relatedness(
 
         if inferred_rel != expected_rel:
             line = _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row)
-            family_external_id = expected_ped_s1.get('family_id', expected_ped_s2.get('family_id', 'unknown'))
+            # peddy .samples() yields Sample objects (attribute access), but the
+            # dict lookup above falls back to {} when a sample is missing, so guard
+            # both cases with getattr.
+            family_external_id = (
+                getattr(expected_ped_s1, 'family_id', None)
+                or getattr(expected_ped_s2, 'family_id', None)
+                or 'unknown'
+            )
             if s1 not in relatedness_flags_by_sg_id:
                 relatedness_flags_by_sg_id[s1] = []
             relatedness_flags_by_sg_id[s1].append(
