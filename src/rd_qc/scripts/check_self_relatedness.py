@@ -66,7 +66,7 @@ def run(
     dataset = get_metamist().get_metamist_proj(dataset)
     logger.info(f'Checking self-relatedness for {participant_external_id} in {dataset}')
     relatedness_threshold = config.config_retrieve(
-        ['somalier_self_check', 'kinship_threshold'],
+        ['somalier_self_check', 'relatedness_threshold'],
         0.9,
     )
     logger.info(f'Relatedness threshold: {relatedness_threshold}')
