@@ -6,7 +6,7 @@ sequencing_type = 'genome'
 status_reporter = 'metamist'
 
 [somalier_self_check]
-kinship_threshold = 0.9
+relatedness_threshold = 0.9
 send_to_slack = true
 
 [somalier_pedigree]
