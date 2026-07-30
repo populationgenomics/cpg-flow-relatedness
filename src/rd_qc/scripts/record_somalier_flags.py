@@ -245,7 +245,9 @@ def reconcile_sg_somalier_relatedness_flags(
             # Identity (sg_id_1/sg_id_2/family_external_id/expected_relationship/inferred_relationship)  # noqa: ERA001
             # is unchanged so this counts as 'retained', not 'updated'.
             new_flag = new_somalier_relatedness_flags_by_key[flag_key]
-            flag['value'] = new_flag['value']
+            flag['relatedness'] = new_flag['relatedness']
+            flag['ibs0'] = new_flag['ibs0']
+            flag['ibs2'] = new_flag['ibs2']
             logger.info(f"{sg_id} :: {report} flag '{flag['category']}' remains unresolved (value refreshed).")
             stats['retained'] += 1
         else:
