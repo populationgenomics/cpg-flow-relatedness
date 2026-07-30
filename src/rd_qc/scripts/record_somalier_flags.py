@@ -119,12 +119,10 @@ def reconcile_sg_somalier_sex_inference_flags(
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (provided/inferred) is unchanged so this counts as 'retained', not 'updated'.
             new_flag = new_somalier_sex_inference_flags_by_key[flag_key]
-            flag['mean_depth'] = new_flag['mean_depth']
-            flag['x_het_ratio'] = new_flag['x_het_ratio']
-            flag['x_depth_ratio'] = new_flag['x_depth_ratio']
-            flag['y_depth_ratio'] = new_flag['y_depth_ratio']
-            flag['x_sites'] = new_flag['x_sites']
-            flag['p_middling_ab'] = new_flag['p_middling_ab']
+            flag |= {
+                key: new_flag[key]
+                for key in ['mean_depth', 'x_het_ratio', 'x_depth_ratio', 'y_depth_ratio', 'p_middling_ab']
+            }
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' "
                 'remains unresolved (value refreshed).'
