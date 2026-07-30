@@ -233,7 +233,7 @@ def run(
     html_url: str,
     base_output_html: str,
     dataset: str,
-    output_json: str | None = None,
+    output_json: str,
 ):
     """Report pedigree inconsistencies, given somalier outputs."""
 
@@ -372,7 +372,7 @@ if __name__ == '__main__':
     parser.add_argument('--output-samples', required=True)
     parser.add_argument('--output-html', required=True, help='gs:// path to HTML (namespaced by AR GUID)')
     parser.add_argument('--base-output-html', required=True, help='gs:// path to HTML (fixed, not namespaced)')
-    parser.add_argument('--output-json', required=False, help='JSON output file for results')
+    parser.add_argument('--output-json', required=True, help='JSON output file for results')
     args = parser.parse_args()
     run(
         somalier_samples_fpath=args.somalier_samples,

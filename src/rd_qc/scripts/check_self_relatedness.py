@@ -55,7 +55,7 @@ def run(
     output_samples: str,
     output_html: str,
     html_url: str,
-    output_json: str | None = None,
+    output_json: str,
 ):
     """
     Check somalier self-relatedness results for a single participant.
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     parser.add_argument('--output-samples', required=True)
     parser.add_argument('--output-html', required=True, help='gs:// path to HTML report')
     parser.add_argument('--html-url', required=True, help='Web-accessible URL for HTML report')
-    parser.add_argument('--output-json', required=False, help='JSON output file for results')
+    parser.add_argument('--output-json', required=True, help='JSON output file for results')
     args = parser.parse_args()
     run(
         pairs_fpath=args.pairs_tsv,
