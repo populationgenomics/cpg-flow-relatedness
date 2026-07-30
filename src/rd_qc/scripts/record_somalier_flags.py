@@ -237,30 +237,30 @@ def reconcile_sg_somalier_relatedness_flags(
                 # Previously-flagged issue no longer present: mark resolved
                 flag['resolved'] = True
                 flag['resolution_date'] = today
-                logger.info(f"{sg_id} :: Marking {report} flag '{flag['flag']}' as resolved.")
+                logger.info(f"{sg_id} :: Marking {report} flag '{flag['category']}' as resolved.")
                 stats['resolved'] += 1
             else:
                 # Already resolved and still absent: keep as-is
-                logger.info(f"{sg_id} :: {report} flag '{flag['flag']}' remains resolved.")
+                logger.info(f"{sg_id} :: {report} flag '{flag['category']}' remains resolved.")
         elif compare_somalier_relatedness_flag(flag, new_somalier_relatedness_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (sg_id_1/sg_id_2/family_external_id/expected_relationship/inferred_relationship)  # noqa: ERA001
             # is unchanged so this counts as 'retained', not 'updated'.
             new_flag = new_somalier_relatedness_flags_by_key[flag_key]
             flag['value'] = new_flag['value']
-            logger.info(f"{sg_id} :: {report} flag '{flag['flag']}' remains unresolved (value refreshed).")
+            logger.info(f"{sg_id} :: {report} flag '{flag['category']}' remains unresolved (value refreshed).")
             stats['retained'] += 1
         else:
             # Current flag exists in new run but differs (or was resolved and has reappeared):
             # overwrite with new flag data (which sets resolved=False)
             flag.update(new_somalier_relatedness_flags_by_key[flag_key])
-            logger.info(f"{sg_id} :: {report} flag '{flag['flag']}' updated with new information.")
+            logger.info(f"{sg_id} :: {report} flag '{flag['category']}' updated with new information.")
             stats['updated'] += 1
         final_flags.append(SomalierRelatednessFlag(**flag))
     for flag_key, flag in new_somalier_relatedness_flags_by_key.items():
         if flag_key in existing_flags_by_key:
             continue
-        logger.info(f"{sg_id} :: Adding new {report} flag '{flag['flag']}'.")
+        logger.info(f"{sg_id} :: Adding new {report} flag '{flag['category']}'.")
         final_flags.append(SomalierRelatednessFlag(**flag))
         stats['added'] += 1
 

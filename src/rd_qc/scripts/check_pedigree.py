@@ -187,9 +187,7 @@ def _check_relatedness(
             # dict lookup above falls back to {} when a sample is missing, so guard
             # both cases with getattr.
             family_external_id = (
-                getattr(expected_ped_s1, 'family_id', None)
-                or getattr(expected_ped_s2, 'family_id', None)
-                or 'unknown'
+                getattr(expected_ped_s1, 'family_id', None) or getattr(expected_ped_s2, 'family_id', None) or 'unknown'
             )
             if s1 not in relatedness_flags_by_sg_id:
                 relatedness_flags_by_sg_id[s1] = []
