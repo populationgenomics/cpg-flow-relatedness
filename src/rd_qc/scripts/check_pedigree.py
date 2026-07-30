@@ -182,6 +182,10 @@ def _check_relatedness(
                 inferred_rel = 'unknown'
 
         if inferred_rel != expected_rel:
+            # Make sure that the s1 / s2 sample IDs are sorted to ensure consistent keying
+            if s1 > s2:
+                s1, s2 = s2, s1
+
             line = _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row)
             # peddy .samples() yields Sample objects (attribute access), but the
             # dict lookup above falls back to {} when a sample is missing, so guard

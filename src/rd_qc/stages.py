@@ -172,6 +172,8 @@ class SomalierPedigreeCheck(stage.DatasetStage):
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
+        # TODO: this gets the somalier paths for the SGs in both the dataset AND the input cohorts, when
+        # we want to get all SGs in the dataset regardless of being in the input cohorts
         all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
         somalier_paths = {sg_id: str(path) for sg_id, path in all_somalier.items()}
 

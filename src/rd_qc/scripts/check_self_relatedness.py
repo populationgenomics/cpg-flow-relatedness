@@ -117,20 +117,20 @@ def run(
         f'Expected relatedness ~1.0 (threshold: {relatedness_threshold}), found:',
     ]
     for pair in low_relatedness_pairs:
+        # Sort the sample names in the pair so that the same pair is always reported in the same order
+        s1, s2 = sorted([pair['sample_a'], pair['sample_b']])
         lines.append(
-            f'  {pair["sample_a"]} - {pair["sample_b"]}: '
-            f'relatedness={pair["relatedness"]}, '
-            f'ibs0={pair["ibs0"]}, ibs2={pair["ibs2"]}',
+            f'  {s1} - {s2}: relatedness={pair["relatedness"]}, ibs0={pair["ibs0"]}, ibs2={pair["ibs2"]}',
         )
 
         # Only necessary to register the flag for the first SG in each pair
-        if pair['sample_a'] not in flags_by_sg_id:
-            flags_by_sg_id[pair['sample_a']] = []
-        flags_by_sg_id[pair['sample_a']].append(
+        if s1 not in flags_by_sg_id:
+            flags_by_sg_id[s1] = []
+        flags_by_sg_id[s1].append(
             SomalierSelfRelatednessFlag(
                 category='self_relatedness_mismatch',
-                sg_id_1=pair['sample_a'],
-                sg_id_2=pair['sample_b'],
+                sg_id_1=s1,
+                sg_id_2=s2,
                 participant_external_id=participant_external_id,
                 threshold=relatedness_threshold,
                 relatedness=float(pair['relatedness']),
