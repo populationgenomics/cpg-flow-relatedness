@@ -50,7 +50,6 @@ def run(
     pairs_fpath: str,
     participant_external_id: str,
     dataset: str,
-    relatedness_threshold: float,
     sg_ids: list[str],
     output_pairs: str,
     output_samples: str,
@@ -66,6 +65,10 @@ def run(
 
     dataset = get_metamist().get_metamist_proj(dataset)
     logger.info(f'Checking self-relatedness for {participant_external_id} in {dataset}')
+    relatedness_threshold = config.config_retrieve(
+        ['somalier_self_check', 'relatedness_threshold'],
+        0.9,
+    )
     logger.info(f'Relatedness threshold: {relatedness_threshold}')
 
     low_relatedness_pairs: list[dict[str, Any]] = []
@@ -178,7 +181,6 @@ if __name__ == '__main__':
     parser.add_argument('--pairs-tsv', required=True)
     parser.add_argument('--participant-id', required=True)
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--relatedness-threshold', type=float, default=0.9)
     parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
     parser.add_argument('--output-pairs', required=True)
     parser.add_argument('--output-samples', required=True)
@@ -190,7 +192,6 @@ if __name__ == '__main__':
         pairs_fpath=args.pairs_tsv,
         participant_external_id=args.participant_id,
         dataset=args.dataset,
-        relatedness_threshold=args.relatedness_threshold,
         sg_ids=args.sg_ids,
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,

@@ -47,10 +47,6 @@ def identity_check_jobs(
     batch_instance.write_output(relate_j.output, outputs[f'{participant_id}_prefix'])
     batch_instance.write_output(relate_j.html_out, outputs[f'{participant_id}_html'])
 
-    relatedness_threshold = config.config_retrieve(
-        ['somalier_self_check', 'relatedness_threshold'],
-        0.9,
-    )
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
 
     check_j = batch_instance.new_bash_job(
@@ -70,7 +66,6 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     --pairs-tsv {relate_j.output['pairs.tsv']} \\
     --participant-id {participant_id} \\
     --dataset {dataset_name} \\
-    --relatedness-threshold {relatedness_threshold} \\
     --sg-ids {sg_ids_str} \\
     --output-pairs {outputs[f'{participant_id}_pairs_tsv']!s} \\
     --output-samples {outputs[f'{participant_id}_samples_tsv']!s} \\
