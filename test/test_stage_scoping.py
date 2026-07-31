@@ -23,10 +23,10 @@ _PROJECT = 'my-dataset'
 # CPG01 is the only SG in the input cohort. CPG02 shares its participant. CPG03/CPG04 belong to
 # participants with no cohort representation at all - these are what the old scoping dropped.
 _INDEX_ENTRIES = [
-    SgSomalierInfo(sg_id='CPG01', participant_id='PART_A', somalier_path=None),
-    SgSomalierInfo(sg_id='CPG02', participant_id='PART_A', somalier_path='gs://bucket/CPG02.cram.somalier'),
-    SgSomalierInfo(sg_id='CPG03', participant_id='PART_B', somalier_path=None),
-    SgSomalierInfo(sg_id='CPG04', participant_id='PART_C', somalier_path=None),
+    SgSomalierInfo(sg_id='CPG01', participant_external_id='PART_A', somalier_path=None),
+    SgSomalierInfo(sg_id='CPG02', participant_external_id='PART_A', somalier_path='gs://bucket/CPG02.cram.somalier'),
+    SgSomalierInfo(sg_id='CPG03', participant_external_id='PART_B', somalier_path=None),
+    SgSomalierInfo(sg_id='CPG04', participant_external_id='PART_C', somalier_path=None),
 ]
 
 _SOURCE_FILES = {
