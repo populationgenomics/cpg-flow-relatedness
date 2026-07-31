@@ -173,11 +173,9 @@ class SomalierPedigreeCheck(stage.DatasetStage):
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
-        all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
-        somalier_paths = {sg_id: str(path) for sg_id, path in all_somalier.items()}
-
         # filter_sgs=True ensures that only SGs meeting the sequencing type & technology requirements are included
         index = get_project_sgs_and_fingerprints(dataset.name, filter_sgs=True)
+        somalier_paths = {sg_id: info.somalier_path for sg_id, info in index.by_sg.items()}
 
         somalier_self_relatedness_json_paths = [
             path for path in inputs.as_dict(dataset, SomalierSelfCheck).values() if str(path).endswith('.json')

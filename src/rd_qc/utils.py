@@ -10,6 +10,7 @@ from google.cloud import storage as gcs
 from loguru import logger
 
 from cpg_flow.metamist import get_metamist
+from cpg_utils import Path
 from cpg_utils.config import config_retrieve, try_get_ar_guid
 from metamist.graphql import gql, query
 
@@ -95,7 +96,18 @@ class SgSomalierInfo:
 
     sg_id: str
     participant_external_id: str
-    somalier_path: str | None
+    somalier_path: str | Path | None
+
+
+class SomalierIndex:
+    """Dual-indexed view of somalier data: O(1) lookup by participant or sg_id."""
+
+    def __init__(self, entries: list[SgSomalierInfo]):
+        self.by_participant: dict[str, list[SgSomalierInfo]] = {}
+        self.by_sg: dict[str, SgSomalierInfo] = {}
+        for info in entries:
+            self.by_participant.setdefault(info.participant_external_id, []).append(info)
+            self.by_sg[info.sg_id] = info
 
 
 @dataclass(kw_only=True)
@@ -148,17 +160,6 @@ class SomalierRelatednessFlag(SomalierFlag):
     relatedness: float
     ibs0: int
     ibs2: int
-
-
-class SomalierIndex:
-    """Dual-indexed view of somalier data: O(1) lookup by participant or sg_id."""
-
-    def __init__(self, entries: list[SgSomalierInfo]):
-        self.by_participant: dict[str, list[SgSomalierInfo]] = {}
-        self.by_sg: dict[str, SgSomalierInfo] = {}
-        for info in entries:
-            self.by_participant.setdefault(info.participant_external_id, []).append(info)
-            self.by_sg[info.sg_id] = info
 
 
 @cache
