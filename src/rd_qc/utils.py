@@ -21,6 +21,8 @@ SG_QUERY = gql("""
         project(name: $project) {
             sequencingGroups {
                 id
+                type
+                technology
                 sample {
                     participant {
                         externalId
@@ -40,8 +42,6 @@ ANALYSIS_QUERY = gql("""
         project(name: $project) {
             sequencingGroups(id: {in_: $sgIds}) {
                 id
-                type
-                technology
                 analyses(type: {in_: ["cram", "gvcf"]}) {
                     outputs
                     type
@@ -287,8 +287,7 @@ def build_ped_content(
 
     1. Query full pedigree from metamist (includes unsequenced parents)
     2. For participants with SGs: substitute SG ID for individual_id (one row per SG)
-    3. For unsequenced parents: keep external participant ID
-    4. Substitute paternal_id/maternal_id with SG IDs where possible
+    3. Substitute paternal_id/maternal_id with SG IDs where possible, otherwise leave as participant ID
 
     Args:
         project: metamist project name
