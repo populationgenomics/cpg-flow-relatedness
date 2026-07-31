@@ -396,7 +396,7 @@ def main(
     response = query(DATASET_SG_META_QUERY, variables={'dataset': dataset})
     sequencing_groups = response['project']['sequencingGroups']
 
-    # Reconcile each sequencing group's QC flags
+    # Reconcile each sequencing group's Somalier flags
     new_flags_by_sg: dict[str, list[dict]] = {}
     for sg_id, flags in somalier_self_relatedness_data_by_sg_id.items():
         new_flags_by_sg.setdefault(sg_id, []).extend(flags)

@@ -2,7 +2,7 @@
 
 input_cohorts = []
 sequencing_type = 'genome'
-
+sequencing_technology = 'short-read'
 status_reporter = 'metamist'
 
 [somalier_self_check]

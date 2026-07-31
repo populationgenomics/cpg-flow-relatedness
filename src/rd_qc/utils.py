@@ -53,6 +53,8 @@ ANALYSIS_QUERY = gql("""
         project(name: $project) {
             sequencingGroups(id: {in_: $sgIds}) {
                 id
+                type
+                technology
                 analyses(type: {in_: ["cram", "gvcf"]}) {
                     outputs
                     type
@@ -158,18 +160,30 @@ def _query_project_sgs(project: str) -> list[dict]:
     return response['project']['sequencingGroups']
 
 
-def get_project_sgs_and_fingerprints(project: str) -> SomalierIndex:
+def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> SomalierIndex:
     """
     Query metamist for all SGs in the project with their somalier fingerprint status.
     Returns a SomalierIndex with O(1) lookup by participant or sg_id.
 
     Builds fresh SgSomalierInfo instances each call (safe to mutate)
     while the underlying metamist query is cached.
+
+    If filter_sgs is True, only include SGs that meet the sequencing type & technology requirements
+    as defined in the config.
     """
     raw_sgs = _query_project_sgs(project)
 
     entries = []
     for sg in raw_sgs:
+        if filter_sgs:
+            seq_type = sg.get('type')
+            seq_tech = sg.get('technology')
+            if seq_type != config_retrieve(['workflow', 'sequencing_type']):
+                logger.debug(f'{sg["id"]}: skipping SG with sequencing type {seq_type}')
+                continue
+            if seq_tech != config_retrieve(['workflow', 'sequencing_technology']):
+                logger.debug(f'{sg["id"]}: skipping SG with sequencing technology {seq_tech}')
+                continue
         sg_id = sg['id']
         participant_external_id = sg['sample']['participant']['externalId']
         analyses = sg.get('analyses', [])

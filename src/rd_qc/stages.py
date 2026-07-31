@@ -140,6 +140,18 @@ class SomalierSelfCheck(stage.DatasetStage):
 
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints, SomalierSelfCheck])
 class SomalierPedigreeCheck(stage.DatasetStage):
+    """
+    This stage runs somalier relate on all SGs in the dataset using the expected pedigree. It then compiles these
+    results alongside as the self-relatedness checks from the previous stage and registers any flags in metamist.
+
+    Flags are determined by comparing the relatedness results to the relationships defined in the expected pedigree.
+
+    While the previous stages are run on all SGs in the dataset, this stage is scoped to only those SGs that meet
+    the sequencing type & technology requirements as defined in the config. This prevents the results from becoming
+    too difficult to interpret for datasets where participants have SGs with multiple different sequencing types
+    and technologies.
+    """
+
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
         """
         Expected outputs for the somalier pedigree check stage.
@@ -172,12 +184,11 @@ class SomalierPedigreeCheck(stage.DatasetStage):
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
-        # TODO: this gets the somalier paths for the SGs in both the dataset AND the input cohorts, when
-        # we want to get all SGs in the dataset regardless of being in the input cohorts
         all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
         somalier_paths = {sg_id: str(path) for sg_id, path in all_somalier.items()}
 
-        index = get_project_sgs_and_fingerprints(dataset.name)
+        # filter_sgs=True ensures that only SGs meeting the sequencing type & technology requirements are included
+        index = get_project_sgs_and_fingerprints(dataset.name, filter_sgs=True)
 
         somalier_self_relatedness_json_paths = [
             path for path in inputs.as_dict(dataset, SomalierSelfCheck).values() if str(path).endswith('.json')
