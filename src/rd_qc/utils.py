@@ -186,8 +186,8 @@ def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> 
     entries = []
     for sg in raw_sgs:
         if filter_sgs:
-            seq_type = sg.get('type')
-            seq_tech = sg.get('technology')
+            seq_type = sg['type']
+            seq_tech = sg['technology']
             if seq_type != config_retrieve(['workflow', 'sequencing_type']):
                 logger.debug(f'{sg["id"]}: skipping SG with sequencing type {seq_type}')
                 continue
@@ -196,7 +196,7 @@ def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> 
                 continue
         sg_id = sg['id']
         participant_external_id = sg['sample']['participant']['externalId']
-        analyses = sg.get('analyses', [])
+        analyses = sg['analyses']
         somalier_path = analyses[0]['outputs'].get('path') if analyses else None
         entries.append(SgSomalierInfo(sg_id, participant_external_id, somalier_path))
 

@@ -1,6 +1,8 @@
 """Stages for the rd_qc somalier QC workflow."""
 
-from rd_qc.jobs import generate_somalier, relate
+from datetime import datetime
+
+from rd_qc.jobs import generate_somalier, relate, somalier_flags_report
 from rd_qc.utils import (
     build_ped_content,
     find_sgids_without_somalier,
@@ -15,6 +17,11 @@ from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
+def convert_to_web_url(path: Path, dataset: targets.Dataset) -> str:
+    """Convert a Path to a web URL, if the dataset has a web URL."""
+    if base_url := dataset.web_url():
+        return str(path).replace(str(dataset.web_prefix()), base_url)
+    return str(path)
 
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
@@ -196,4 +203,38 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             job_attrs={},
         )
 
+        return self.make_outputs(dataset, data=outputs, jobs=jobs)
+
+@stage.stage(
+    required_stages=[SomalierPedigreeCheck],
+    forced=True,
+)
+class GenerateSomalierFlagsReport(stage.DatasetStage):
+    """
+    Queries Metamist for all Somalier flags across the dataset's sequencing groups
+    and generates a summary HTML report saved to both a static URL and a
+    timestamped URL in the dataset's web bucket.
+    """
+
+    def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
+        timestamp = datetime.now().astimezone().strftime('%Y-%m-%d_%H%M%S')
+        return {
+            'timestamped': dataset.web_prefix() / 'somalier_flags' / timestamp / 'somalier_flags_report.html',
+            'html': dataset.web_prefix() / 'somalier_flags' / 'somalier_flags_report.html',
+        }
+
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+        outputs = self.expected_outputs(dataset)
+
+        out_html_url = convert_to_web_url(outputs['html'], dataset)
+        somalier_report_url = convert_to_web_url(
+            inputs.as_path_by_target(SomalierPedigreeCheck, 'base_html_url')[dataset.name], dataset)
+
+        jobs = somalier_flags_report.somalier_flags_report_job(
+            dataset=dataset.name,
+            outputs=outputs,
+            out_html_url=out_html_url,
+            somalier_report_url=somalier_report_url,
+            job_attrs=self.get_job_attrs(dataset),
+        )
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
