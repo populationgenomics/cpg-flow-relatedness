@@ -5,6 +5,7 @@ from datetime import datetime
 from rd_qc.jobs import generate_somalier, relate, somalier_flags_report
 from rd_qc.utils import (
     build_ped_content,
+    convert_to_web_url,
     find_sgids_without_somalier,
     get_project_sgs_and_fingerprints,
     select_somalier_extract_targets,
@@ -17,11 +18,6 @@ from cpg_utils.existence_checks import exists
 
 _MIN_SGS_FOR_IDENTITY_CHECK = 2
 
-def convert_to_web_url(path: Path, dataset: targets.Dataset) -> str:
-    """Convert a Path to a web URL, if the dataset has a web URL."""
-    if base_url := dataset.web_url():
-        return str(path).replace(str(dataset.web_prefix()), base_url)
-    return str(path)
 
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
@@ -209,6 +205,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
 
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
 
+
 @stage.stage(
     required_stages=[SomalierPedigreeCheck],
     forced=True,
@@ -230,15 +227,16 @@ class GenerateSomalierFlagsReport(stage.DatasetStage):
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
-        out_html_url = convert_to_web_url(outputs['html'], dataset)
-        somalier_report_url = convert_to_web_url(
-            inputs.as_path_by_target(SomalierPedigreeCheck, 'base_html_url')[dataset.name], dataset)
+        out_html_url = convert_to_web_url(dataset.name, outputs['html'])
+        somalier_html_url = convert_to_web_url(
+            dataset.name, inputs.as_path_by_target(SomalierPedigreeCheck, 'base_html_url')[dataset.name]
+        )
 
         jobs = somalier_flags_report.somalier_flags_report_job(
             dataset=dataset.name,
             outputs=outputs,
             out_html_url=out_html_url,
-            somalier_report_url=somalier_report_url,
+            somalier_html_url=somalier_html_url,
             job_attrs=self.get_job_attrs(dataset),
         )
         return self.make_outputs(dataset, data=outputs, jobs=jobs)

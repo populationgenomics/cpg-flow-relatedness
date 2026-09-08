@@ -162,6 +162,18 @@ class SomalierRelatednessFlag(SomalierFlag):
     ibs2: int
 
 
+def convert_to_web_url(dataset_name: str, html_path: Path | str) -> str:
+    """
+    Convert a gs:// web-bucket path to the http(s) web URL.
+    """
+    # Important - strip -test from dataset suffix before constructing the web URL
+    dataset_name = dataset_name.removesuffix('-test')
+    return str(html_path).replace(
+        config_retrieve(['storage', dataset_name, 'web']),
+        config_retrieve(['storage', dataset_name, 'web_url']),
+    )
+
+
 @cache
 def _query_project_sgs(project: str) -> list[dict]:
     """Cached metamist query — returns raw response data."""

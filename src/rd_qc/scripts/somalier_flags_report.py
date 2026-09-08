@@ -3,10 +3,8 @@ Queries Metamist for all Somalier flags across a dataset's sequencing groups
 and renders them into a report using the somalier_flags_report.html.jinja template.
 """
 
-import re
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -18,7 +16,6 @@ from rd_qc.utils import SomalierFlag
 from cpg_utils import to_path
 from cpg_utils.config import config_retrieve, dataset_for_access_level
 from cpg_utils.metamist_registration import create_new
-from cpg_utils.slack import send_message
 from metamist.graphql import gql, query
 
 STAGE_NAME = 'GenerateSomalierFlagsReport'
@@ -84,6 +81,7 @@ EXISTING_ANALYSES_QUERY = gql(
     """
 )
 
+
 @dataclass
 class SGInfo:
     sg_id: str
@@ -106,8 +104,10 @@ class SGReport:
     sg_info: SGInfo
     somalier_flags: list[SomalierFlag]
 
+
 def _has_active(flags: list[SomalierFlag]) -> bool:
     return any(not f.resolved for f in flags)
+
 
 # ---------------------------------------------------------------------------
 # Metamist querying
@@ -225,12 +225,10 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[dict]:
     for sg in sequencing_groups:
         meta = sg.get('meta') or {}
         results.append(
-            {
-                'id': sg['id'],
-                'somalier_flags': [SomalierFlag(**flag) for flag in meta.get('somalier_flags', [])]
-            }
+            {'id': sg['id'], 'somalier_flags': [SomalierFlag(**flag) for flag in meta.get('somalier_flags', [])]}
         )
     return results
+
 
 def summarise_flags(sg_data: list[dict]) -> dict:
     """Dataset-wide, flag-centric summary counts for the header cards."""
@@ -252,6 +250,7 @@ def summarise_flags(sg_data: list[dict]) -> dict:
         'resolved_flags': sum(1 for f in all_flags if f.resolved),
     }
 
+
 def render_report(dataset: str, reports: list[SGReport], summary: dict) -> str:
     """Render the Somalier flags report HTML using the Jinja template."""
     env = jinja2.Environment(
@@ -262,7 +261,7 @@ def render_report(dataset: str, reports: list[SGReport], summary: dict) -> str:
     return template.render(dataset=dataset, reports=reports, summary=summary)
 
 
-def construct_summary_message(  # noqa: PLR0917
+def construct_summary_message(
     dataset: str,
     flags_html_url: str,
     somalier_html_url: str,
@@ -272,16 +271,9 @@ def construct_summary_message(  # noqa: PLR0917
     previous_analysis: dict | None,
 ):
     """Construct a Slack message with a concise summary and a link to the report."""
-    pass
 
 
-def main(
-    dataset: str,
-    output_html: str,
-    base_output_html: str,
-    flags_html_url: str,
-    somalier_html_url: str
-) -> None:
+def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: str, somalier_html_url: str) -> None:
     """Query Metamist for Somalier flags and generate a Somalier flags HTML report."""
 
     dataset = dataset_for_access_level(dataset)
@@ -360,7 +352,6 @@ def main(
     )
 
 
-
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dataset', required=True, help='Metamist dataset/project name')
@@ -374,5 +365,5 @@ if __name__ == '__main__':
         output_html=args.output_html,
         base_output_html=args.base_output_html,
         flags_html_url=args.flags_html_url,
-        somalier_html_url=args.somalier_html_url
+        somalier_html_url=args.somalier_html_url,
     )

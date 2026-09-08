@@ -20,7 +20,7 @@ from cpg_utils import config, slack, to_path
 from cpg_utils.metamist_registration import create_new
 
 
-def write_result_json(  # noqa: PLR0917
+def write_result_json(
     dataset: str,
     participant_external_id: str,
     relatedness_threshold: float,
@@ -46,7 +46,7 @@ def write_result_json(  # noqa: PLR0917
             json.dump(result, f, indent=2)
 
 
-def run(  # noqa: PLR0917
+def run(
     dataset: str,
     participant_external_id: str,
     sg_ids: list[str],

@@ -11,6 +11,7 @@ def somalier_flags_report_job(
     dataset: str,
     outputs: dict[str, Path],
     out_html_url: str,
+    somalier_html_url: str,
     job_attrs: dict,
 ) -> Job:
     """
@@ -26,9 +27,10 @@ def somalier_flags_report_job(
         f"""\
     python3 -m align_genotype.scripts.somalier_flags_report \\
         --dataset {dataset} \\
-        --fixed-output {outputs['html']} \\
-        --timestamped-output {outputs['timestamped']} \\
-        --html-url {out_html_url}
+        --output-html {outputs['timestamped']} \\
+        --base-output-html {outputs['html']} \\
+        --flags-html-url {out_html_url} \\
+        --somalier-html-url {somalier_html_url}
     """
     )
 

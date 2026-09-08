@@ -4,19 +4,9 @@ Jobs for somalier relate — used by both identity checks and pedigree checks.
 
 from hailtop.batch.job import BashJob
 
+from rd_qc.utils import convert_to_web_url
+
 from cpg_utils import Path, config, hail_batch
-
-
-def _get_out_html_url(dataset_name: str, html_path: Path | str) -> str:
-    """
-    Convert a gs:// web-bucket path to the http(s) web URL.
-    """
-    # Important - strip -test from dataset suffix before constructing the web URL
-    dataset_name = dataset_name.removesuffix('-test')
-    return str(html_path).replace(
-        config.config_retrieve(['storage', dataset_name, 'web']),
-        config.config_retrieve(['storage', dataset_name, 'web_url']),
-    )
 
 
 def self_relatedness_jobs(
@@ -68,7 +58,7 @@ def self_relatedness_jobs(
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = _get_out_html_url(dataset_name, outputs[f'{participant_id}_html'])
+    out_html_url = convert_to_web_url(dataset_name, outputs[f'{participant_id}_html'])
 
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
@@ -87,7 +77,7 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     return [relate_j, check_j]
 
 
-def pedigree_check_jobs(  # noqa: PLR0917
+def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
     somalier_self_relatedness_json_paths: list[Path | str],
     outputs: dict[str, Path],
@@ -143,7 +133,7 @@ def pedigree_check_jobs(  # noqa: PLR0917
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = _get_out_html_url(dataset_name, outputs['html'])
+    out_html_url = convert_to_web_url(dataset_name, outputs['html'])
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\
@@ -177,7 +167,7 @@ touch {check_j.output}
     return [relate_j, check_j, record_j]
 
 
-def record_somalier_flags_job(  # noqa: PLR0917
+def record_somalier_flags_job(
     dataset_name: str,
     sg_ids: str,
     tmp_prefix: Path,

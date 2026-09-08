@@ -43,7 +43,7 @@ def error(msg):
     logger.error(msg)
 
 
-def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row) -> str:  # noqa: PLR0917
+def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row) -> str:
     fam1 = expected_ped_s1.family_id if expected_ped_s1 else None
     fam2 = expected_ped_s2.family_id if expected_ped_s2 else None
     if fam1 == fam2:
@@ -226,7 +226,7 @@ def _check_relatedness(
     return relatedness_flags_by_sg_id
 
 
-def run(  # noqa: PLR0917
+def run(
     dataset: str,
     title: str,
     sg_ids: list[str],
