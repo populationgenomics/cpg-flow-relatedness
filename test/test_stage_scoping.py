@@ -97,7 +97,7 @@ def test_queue_jobs_extracts_for_out_of_cohort_sgs(stage_instance):
     job_kwargs = calls['job_kwargs']
     assert set(job_kwargs['somalier_targets']) == {'CPG01', 'CPG03'}
     assert set(job_kwargs['somalier_outputs']) == {'CPG01', 'CPG03'}
-    assert job_kwargs['project'] == _PROJECT
+    assert job_kwargs['dataset_name'] == _PROJECT
 
     # the stage still advertises the full dataset-wide fingerprint set downstream
     assert set(outputs.data) == {'CPG01', 'CPG02', 'CPG03'}
