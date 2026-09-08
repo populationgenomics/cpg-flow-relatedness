@@ -262,7 +262,7 @@ def render_report(dataset: str, reports: list[SGReport], summary: dict) -> str:
     return template.render(dataset=dataset, reports=reports, summary=summary)
 
 
-def construct_summary_message(
+def construct_summary_message(  # noqa: PLR0917
     dataset: str,
     out_html_url: str,
     somalier_url: str,

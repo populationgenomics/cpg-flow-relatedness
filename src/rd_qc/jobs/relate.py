@@ -77,7 +77,7 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
     return [relate_j, check_j]
 
 
-def pedigree_check_jobs(
+def pedigree_check_jobs(  # noqa: PLR0917
     somalier_paths: dict[str, str | Path],
     somalier_self_relatedness_json_paths: list[Path | str],
     outputs: dict[str, Path],
@@ -171,7 +171,7 @@ touch {check_j.output}
     return [relate_j, check_j, record_j]
 
 
-def record_somalier_flags_job(
+def record_somalier_flags_job(  # noqa: PLR0917
     dataset_name: str,
     tmp_prefix: Path,
     sg_ids: str,

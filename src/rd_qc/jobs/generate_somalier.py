@@ -12,7 +12,7 @@ from cpg_flow.status import complete_analysis_job
 from cpg_utils import Path, config, hail_batch
 
 
-def register_analyses(output, analysis_type, cohort_ids, sg_ids, project_name, meta):
+def register_analyses(output, analysis_type, cohort_ids, sg_ids, project_name, meta):  # noqa: PLR0917
     complete_analysis_job(output, analysis_type, cohort_ids, sg_ids, project_name, meta)
 
 
