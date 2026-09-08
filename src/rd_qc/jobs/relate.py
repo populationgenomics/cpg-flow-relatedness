@@ -4,14 +4,16 @@ Jobs for somalier relate — used by both identity checks and pedigree checks.
 
 from hailtop.batch.job import BashJob
 
+from rd_qc.utils import convert_to_web_url
+
 from cpg_utils import Path, config, hail_batch
 
 
-def identity_check_jobs(
-    participant_id: str,
-    outputs: dict[str, Path | str],
-    somalier_paths: dict[str, str | Path],
+def self_relatedness_jobs(
     dataset_name: str,
+    participant_id: str,
+    somalier_paths: dict[str, str | Path],
+    outputs: dict[str, Path | str],
     job_attrs: dict[str, str],
 ) -> list[BashJob]:
     """
@@ -33,7 +35,7 @@ def identity_check_jobs(
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
-        somalier_file = batch_instance.read_input(str(somalier_path))
+        somalier_file = batch_instance.read_input(somalier_path)
         relate_j.command(f'mv {somalier_file} inputs/{sg_id}.somalier')
 
     relate_j.declare_resource_group(
@@ -47,10 +49,6 @@ def identity_check_jobs(
     batch_instance.write_output(relate_j.output, outputs[f'{participant_id}_prefix'])
     batch_instance.write_output(relate_j.html_out, outputs[f'{participant_id}_html'])
 
-    kinship_threshold = config.config_retrieve(
-        ['somalier_self_check', 'kinship_threshold'],
-        0.9,
-    )
     sg_ids_str = ','.join(sorted(somalier_paths.keys()))
 
     check_j = batch_instance.new_bash_job(
@@ -60,22 +58,20 @@ def identity_check_jobs(
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = str(outputs[f'{participant_id}_html']).replace(
-        config.config_retrieve(['storage', dataset_name, 'web']),
-        config.config_retrieve(['storage', dataset_name, 'web_url']),
-    )
+    out_html_url = convert_to_web_url(dataset_name, outputs[f'{participant_id}_html'])
 
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
-    --pairs-tsv {relate_j.output['pairs.tsv']} \\
-    --participant-id {participant_id} \\
     --dataset {dataset_name} \\
-    --kinship-threshold {kinship_threshold} \\
+    --participant-id {participant_id} \\
     --sg-ids {sg_ids_str} \\
+    --somalier-pairs {relate_j.output['pairs.tsv']} \\
+    --somalier-samples {relate_j.output['samples.tsv']} \\
     --output-pairs {outputs[f'{participant_id}_pairs_tsv']!s} \\
     --output-samples {outputs[f'{participant_id}_samples_tsv']!s} \\
     --output-html {outputs[f'{participant_id}_html']!s} \\
-    --html-url {out_html_url}
+    --html-url {out_html_url} \\
+    --output-json {outputs[f'{participant_id}_json']!s}
 """)
 
     return [relate_j, check_j]
@@ -83,7 +79,9 @@ python3 -m rd_qc.scripts.check_self_relatedness \\
 
 def pedigree_check_jobs(
     somalier_paths: dict[str, str | Path],
+    somalier_self_relatedness_json_paths: list[Path | str],
     outputs: dict[str, Path],
+    tmp_prefix: Path,
     dataset_name: str,
     label: str,
     job_attrs: dict[str, str],
@@ -109,10 +107,10 @@ def pedigree_check_jobs(
 
     relate_j.command('mkdir -p inputs/')
     for sg_id, somalier_path in somalier_paths.items():
-        somalier_file = batch_instance.read_input(str(somalier_path))
+        somalier_file = batch_instance.read_input(somalier_path)
         relate_j.command(f'mv {somalier_file} inputs/{sg_id}.somalier')
 
-    ped_input = batch_instance.read_input(str(ped_path))
+    ped_input = batch_instance.read_input(ped_path)
 
     relate_j.declare_resource_group(
         output={
@@ -122,36 +120,91 @@ def pedigree_check_jobs(
     )
     relate_j.command(f'somalier relate --ped {ped_input} -o {relate_j.output} --infer inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, outputs['output_prefix'])
-    batch_instance.write_output(relate_j.html_out, str(outputs['html']))
+    batch_instance.write_output(relate_j.output, outputs['samples'].parent)
+    # First copy of the HTML report written to a uniquely namespaced URL based on this run's AR GUID
+    batch_instance.write_output(relate_j.html_out, outputs['html'])
+    # Second copy of the HTML report written to the fixed URL
+    batch_instance.write_output(relate_j.html_out, outputs['base_html_url'])
 
-    sg_ids_str = ','.join(sorted(somalier_paths.keys()))
+    sg_ids_str = ' '.join(sorted(somalier_paths.keys()))
     title = f'Pedigree check [{label}]'
 
     check_j = batch_instance.new_bash_job(title, job_attrs)
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = str(outputs['html']).replace(
-        config.config_retrieve(['storage', dataset_name, 'web']),
-        config.config_retrieve(['storage', dataset_name, 'web_url']),
-    )
+    out_html_url = convert_to_web_url(dataset_name, outputs['html'])
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\
-    --somalier-samples {relate_j.output['samples.tsv']} \\
-    --somalier-pairs {relate_j.output['pairs.tsv']} \\
-    --ped {ped_input} \\
-    --html-url {out_html_url} \\
     --dataset {dataset_name} \\
     --title "{title}" \\
     --sg-ids {sg_ids_str} \\
+    --expected-ped {ped_input} \\
+    --somalier-samples {relate_j.output['samples.tsv']} \\
+    --somalier-pairs {relate_j.output['pairs.tsv']} \\
     --output-pairs {outputs['pairs']!s} \\
     --output-samples {outputs['samples']!s} \\
-    --output-html {outputs['html']!s}
+    --output-html {outputs['html']!s} \\
+    --base-output-html {outputs['base_html_url']!s} \\
+    --html-url {out_html_url} \\
+    --output-json {outputs['json']!s}
 touch {check_j.output}
 """
     check_j.command(cmd)
-    batch_instance.write_output(check_j.output, str(outputs['checks']))
+    batch_instance.write_output(check_j.output, outputs['checks'])
 
-    return [relate_j, check_j]
+    record_j = record_somalier_flags_job(
+        dataset_name=dataset_name,
+        tmp_prefix=tmp_prefix,
+        sg_ids=sg_ids_str,
+        somalier_self_relatedness_json_paths=somalier_self_relatedness_json_paths,
+        somalier_relatedness_json=str(outputs['json']),
+        job_attrs=job_attrs,
+    )
+    record_j.depends_on(check_j)
+
+    return [relate_j, check_j, record_j]
+
+
+def record_somalier_flags_job(
+    dataset_name: str,
+    sg_ids: str,
+    tmp_prefix: Path,
+    somalier_self_relatedness_json_paths: list[Path | str],
+    somalier_relatedness_json: str,
+    job_attrs: dict | None = None,
+) -> BashJob:
+    """
+    Run job that records all Somalier flags in Metamist by reading the self-relatedness JSON files for
+    each sequencing group and the relatedness JSON file for the dataset
+
+    Updates SG meta with any new or changed flags.
+    """
+    batch_instance = hail_batch.get_batch()
+    record_j = batch_instance.new_job('Record Somalier flags', (job_attrs or {}) | {'tool': 'python'})
+
+    record_j.image(config.config_retrieve(['workflow', 'driver_image']))
+
+    # Read in all the self-relatedness JSON files for the SGs
+    file_list_path = tmp_prefix / f'{dataset_name}_somalier-self-relatedness-file-list.txt'
+    with file_list_path.open('w') as f:
+        f.writelines([f'{p}\n' for p in somalier_self_relatedness_json_paths])
+    somalier_self_relatedness_jsons = batch_instance.read_input(file_list_path)
+
+    # Read in the full relatedness JSON file for the dataset
+    somalier_relatedness_json = batch_instance.read_input(somalier_relatedness_json)
+
+    cmd = f"""\
+    mkdir -p self_relatedness_jsons
+    cat {somalier_self_relatedness_jsons} | gcloud storage cp -I self_relatedness_jsons/
+
+    python3 -m rd_qc.scripts.record_somalier_flags \\
+    --dataset {dataset_name} \\
+    --sg-ids {sg_ids} \\
+    --somalier-self-relatedness-json-dir self_relatedness_jsons \\
+    --somalier-relatedness-json-path {somalier_relatedness_json}
+    """
+
+    record_j.command(cmd)
+    return record_j

@@ -10,11 +10,16 @@ a channel with:
 """
 
 import contextlib
+import json
 from argparse import ArgumentParser
+from dataclasses import asdict
+from typing import Any
 
 import pandas as pd
 from loguru import logger
-from peddy import Ped
+from peddy import Ped, Sample
+
+from rd_qc.utils import SomalierFlag, SomalierRelatednessFlag, SomalierSexInferenceFlag
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
@@ -57,10 +62,13 @@ def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel
     )
 
 
-def _check_sex(samples_df) -> set[str]:
+def _check_sex(samples_df: pd.DataFrame) -> dict[str, SomalierSexInferenceFlag]:
     info('*Inferred vs. reported sex:*')
     samples_df.sex = samples_df.sex.apply(lambda x: {1: 'male', 2: 'female'}.get(x, 'unknown'))
     samples_df.original_pedigree_sex = samples_df.original_pedigree_sex.apply(lambda x: {'-9': 'unknown'}.get(x, x))
+    samples_df['x_het_ratio'] = samples_df.X_het / samples_df.X_hom_alt.replace(0, 1)  # avoid division by zero
+    samples_df['x_depth_ratio'] = 2 * samples_df.X_depth_mean / samples_df.gt_depth_mean
+    samples_df['y_depth_ratio'] = 2 * samples_df.Y_depth_mean / samples_df.gt_depth_mean
     missing_inferred_sex = samples_df.sex == 'unknown'
     missing_provided_sex = samples_df.original_pedigree_sex == 'unknown'
     mismatching_female = (samples_df.sex == 'female') & (samples_df.original_pedigree_sex == 'male')
@@ -71,15 +79,28 @@ def _check_sex(samples_df) -> set[str]:
     )
     matching_sex = ~mismatching_sex & ~mismatching_other
 
-    sex_mismatch_ids = set(samples_df[mismatching_sex].sample_id)
+    sex_mismatches_by_sgid: dict[str, SomalierSexInferenceFlag] = {
+        row.sample_id: SomalierSexInferenceFlag(
+            category='sex_inference_mismatch',
+            provided=str(row.original_pedigree_sex),
+            inferred=str(row.sex),
+            mean_depth=float(row.gt_depth_mean),
+            x_het_ratio=float(row.x_het_ratio),
+            x_depth_ratio=float(row.x_depth_ratio),
+            y_depth_ratio=float(row.y_depth_ratio),
+            x_sites=int(row.X_n),
+            p_middling_ab=float(row.p_middling_ab),
+        )
+        for _, row in samples_df[mismatching_sex].iterrows()
+    }
 
-    def _print_stats(df_filter) -> None:
+    def _print_stats(df_filter: pd.Series) -> None:
         for _, row_ in samples_df[df_filter].iterrows():
             info(
                 f' {row_.sample_id} ('
                 f'provided: {row_.original_pedigree_sex}, '
                 f'inferred: {row_.sex}, '
-                f'mean depth: {row_.gt_depth_mean})',
+                f'X het ratio: {row_.x_het_ratio:.2f})'
             )
 
     if mismatching_sex.any():
@@ -99,7 +120,7 @@ def _check_sex(samples_df) -> set[str]:
     )
     info('')
 
-    return sex_mismatch_ids
+    return sex_mismatches_by_sgid
 
 
 def _report_relatedness_findings(
@@ -131,24 +152,25 @@ def _check_relatedness(
     expected_ped: Ped,
     inferred_ped: Ped,
     bad_ids: list,
-) -> tuple[list[str], list[str]]:
+) -> dict[str, list[SomalierRelatednessFlag]]:
     info('*Relatedness:*')
-    expected_ped_sample_by_id = {s.sample_id: s for s in expected_ped.samples()}
-    inferred_ped_sample_by_id = {s.sample_id: s for s in inferred_ped.samples()}
+    expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
+    inferred_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in inferred_ped.samples()}
 
     mismatching_unrelated_to_related = []
     mismatching_related_to_unrelated = []
 
+    relatedness_flags_by_sg_id: dict[str, list[SomalierRelatednessFlag]] = {}
     for idx, row in pairs_df.iterrows():
         s1 = row['#sample_a']
         s2 = row['sample_b']
         if s1 in bad_ids or s2 in bad_ids:
             continue
 
-        expected_ped_s1 = expected_ped_sample_by_id.get(s1)
-        expected_ped_s2 = expected_ped_sample_by_id.get(s2)
-        inferred_ped_s1 = inferred_ped_sample_by_id.get(s1)
-        inferred_ped_s2 = inferred_ped_sample_by_id.get(s2)
+        expected_ped_s1 = expected_ped_sample_by_id.get(s1, {})
+        expected_ped_s2 = expected_ped_sample_by_id.get(s2, {})
+        inferred_ped_s1 = inferred_ped_sample_by_id.get(s1, {})
+        inferred_ped_s2 = inferred_ped_sample_by_id.get(s2, {})
         with contextlib.redirect_stderr(None), contextlib.redirect_stdout(None):
             if expected_ped_s1 and expected_ped_s2:
                 expected_rel = expected_ped.relation(expected_ped_s1, expected_ped_s2)
@@ -160,7 +182,33 @@ def _check_relatedness(
                 inferred_rel = 'unknown'
 
         if inferred_rel != expected_rel:
+            # Make sure that the s1 / s2 sample IDs are sorted to ensure consistent keying
+            if s1 > s2:
+                s1, s2 = s2, s1
+                expected_ped_s1, expected_ped_s2 = expected_ped_s2, expected_ped_s1
+
             line = _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row)
+            # peddy .samples() yields Sample objects (attribute access), but the
+            # dict lookup above falls back to {} when a sample is missing, so guard
+            # both cases with getattr.
+            family_external_id = (
+                getattr(expected_ped_s1, 'family_id', None) or getattr(expected_ped_s2, 'family_id', None) or 'unknown'
+            )
+            if s1 not in relatedness_flags_by_sg_id:
+                relatedness_flags_by_sg_id[s1] = []
+            relatedness_flags_by_sg_id[s1].append(
+                SomalierRelatednessFlag(
+                    category='relatedness_mismatch',
+                    sg_id_1=s1,
+                    sg_id_2=s2,
+                    family_external_id=family_external_id,
+                    expected_relationship=expected_rel,
+                    inferred_relationship=inferred_rel,
+                    relatedness=row['relatedness'],
+                    ibs0=row['ibs0'],
+                    ibs2=row['ibs2'],
+                ),
+            )
 
             if (expected_rel == 'unknown' and inferred_rel != 'unknown') or (
                 expected_rel == 'unrelated' and inferred_rel != 'unrelated'
@@ -175,31 +223,33 @@ def _check_relatedness(
 
     _report_relatedness_findings(mismatching_unrelated_to_related, mismatching_related_to_unrelated)
 
-    return mismatching_unrelated_to_related, mismatching_related_to_unrelated
+    return relatedness_flags_by_sg_id
 
 
 def run(
-    somalier_samples_fpath: str,
-    somalier_pairs_fpath: str,
-    expected_ped_fpath: str,
+    dataset: str,
     title: str,
     sg_ids: list[str],
+    expected_ped: str,
+    somalier_pairs: str,
+    somalier_samples: str,
     output_pairs: str,
     output_samples: str,
     output_html: str,
+    base_output_html: str,
     html_url: str,
-    dataset: str,
+    output_json: str,
 ):
     """Report pedigree inconsistencies, given somalier outputs."""
 
     dataset = get_metamist().get_metamist_proj(dataset)
 
-    logger.info(somalier_samples_fpath)
-    samples_df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
-    pairs_df = pd.read_csv(somalier_pairs_fpath, delimiter='\t')
-    with to_path(somalier_samples_fpath).open() as f:
+    logger.info(somalier_samples)
+    samples_df = pd.read_csv(somalier_samples, delimiter='\t')
+    pairs_df = pd.read_csv(somalier_pairs, delimiter='\t')
+    with to_path(somalier_samples).open() as f:
         inferred_ped = Ped(f)
-    with to_path(expected_ped_fpath).open() as f:
+    with to_path(expected_ped).open() as f:
         expected_ped = Ped(f)
 
     bad = samples_df.gt_depth_mean == 0.0
@@ -212,8 +262,8 @@ def run(
     bad_ids = list(samples_df[bad].sample_id)  # for checking in pairs_df
     samples_df = samples_df[~bad]
 
-    sex_mismatch_ids = _check_sex(samples_df)
-    mismatching_unrelated_to_related, mismatching_related_to_unrelated = _check_relatedness(
+    sex_mismatches_by_sgid = _check_sex(samples_df)
+    relatedness_flags_by_sg_id = _check_relatedness(
         pairs_df,
         expected_ped,
         inferred_ped,
@@ -223,8 +273,8 @@ def run(
     print_contents(
         samples_df,
         pairs_df,
-        somalier_samples_fpath,
-        somalier_pairs_fpath,
+        somalier_samples,
+        somalier_pairs,
     )
 
     if dataset and html_url:
@@ -236,23 +286,46 @@ def run(
     if config.config_retrieve(['somalier_pedigree', 'send_to_slack'], default=True):
         slack.send_message(text)
 
-    all_issues = mismatching_unrelated_to_related + mismatching_related_to_unrelated
+    all_flags_by_sg_id: dict[str, list[SomalierFlag]] = {}
+    for sg_id, flag in sex_mismatches_by_sgid.items():
+        all_flags_by_sg_id[sg_id] = [flag]
+    for sg_id, flags in relatedness_flags_by_sg_id.items():
+        if sg_id not in all_flags_by_sg_id:
+            all_flags_by_sg_id[sg_id] = []
+        all_flags_by_sg_id[sg_id].extend(flags)
 
-    for sg_id in sg_ids:
-        sg_meta = {
-            'check': 'pedigree',
-            'sex_match': sg_id not in sex_mismatch_ids,
-            'relatedness_issues': [issue for issue in all_issues if sg_id in issue],
-        }
-        create_new(
-            project=dataset,
-            output=output_pairs,
-            analysis_type='somalier_relate',
-            sgs=[sg_id],
-            meta=sg_meta,
-            secondary={'samples': output_samples, 'html': output_html},
-        )
-    logger.info(f'Registered somalier_relate analyses for {len(sg_ids)} SGs')
+    result: dict[str, Any] = {
+        'dataset': dataset,
+        'html_url': html_url,
+        'n_samples_flagged': len([flags for flags in all_flags_by_sg_id.values() if flags]),
+        'relatedness_flags': {sg_id: [asdict(flag) for flag in flags] for sg_id, flags in all_flags_by_sg_id.items()},
+    }
+    if output_json:
+        with to_path(output_json).open('w') as f:
+            json.dump(result, f, indent=2)
+
+    with to_path(output_samples).open('w') as f:
+        f.write(to_path(somalier_samples).read_text())
+    with to_path(output_pairs).open('w') as f:
+        f.write(to_path(somalier_pairs).read_text())
+
+    # Now create the web analysis for the whole dataset
+    create_new(
+        project=dataset,
+        output=output_html,
+        analysis_type='web',
+        sgs=sg_ids,
+        meta={'stage': 'SomalierPedigreeCheck'},
+        secondary={
+            'base_html': base_output_html,
+            'samples': output_samples,
+            'pairs': output_pairs,
+            'json': output_json,
+        },
+    )
+    logger.info(f'Registered web analysis for {dataset} at {output_html}')
+
+    return result
 
 
 def print_contents(
@@ -281,38 +354,42 @@ def print_contents(
 
 if __name__ == '__main__':
     parser = ArgumentParser()
+    parser.add_argument('--dataset', help='Dataset name')
+    parser.add_argument('--title', required=True, help='Report title')
+    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
+    parser.add_argument(
+        '--expected-ped',
+        required=True,
+        help='PED file with expected pedigree',
+    )
     parser.add_argument(
         '--somalier-samples',
         required=True,
-        help='Path to somalier {prefix}.samples.tsv output file',
+        help='Somalier samples.tsv file from relate job',
     )
     parser.add_argument(
         '--somalier-pairs',
         required=True,
-        help='Path to somalier {prefix}.pairs.tsv output file',
+        help='Somalier pairs.tsv file from relate job',
     )
-    parser.add_argument(
-        '--ped',
-        required=True,
-        help='Path to PED file with expected pedigree',
-    )
-    parser.add_argument('--title', required=True, help='Report title')
-    parser.add_argument('--html-url', help='Somalier HTML URL')
-    parser.add_argument('--dataset', help='Dataset name')
-    parser.add_argument('--sg-ids', required=True, help='Comma-separated SG IDs')
-    parser.add_argument('--output-pairs', required=True)
-    parser.add_argument('--output-samples', required=True)
-    parser.add_argument('--output-html', required=True)
+    parser.add_argument('--output-pairs', required=True, help='gs:// path to output pairs TSV')
+    parser.add_argument('--output-samples', required=True, help='gs:// path to output samples TSV')
+    parser.add_argument('--output-html', required=True, help='gs:// path to HTML (namespaced by AR GUID)')
+    parser.add_argument('--base-output-html', required=True, help='gs:// path to HTML (fixed, not namespaced)')
+    parser.add_argument('--html-url', help='Web-accessible HTML path (namespaced by AR GUID)')
+    parser.add_argument('--output-json', required=True, help='gs:// path to JSON output for results')
     args = parser.parse_args()
     run(
-        somalier_samples_fpath=args.somalier_samples,
-        somalier_pairs_fpath=args.somalier_pairs,
-        expected_ped_fpath=args.ped,
-        html_url=args.html_url,
         dataset=args.dataset,
         title=args.title,
-        sg_ids=args.sg_ids.split(','),
+        sg_ids=args.sg_ids,
+        expected_ped=args.expected_ped,
+        somalier_pairs=args.somalier_pairs,
+        somalier_samples=args.somalier_samples,
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,
         output_html=args.output_html,
+        base_output_html=args.base_output_html,
+        html_url=args.html_url,
+        output_json=args.output_json,
     )

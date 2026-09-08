@@ -7,8 +7,8 @@ from argparse import ArgumentParser
 
 from rd_qc.stages import (
     GenerateMissingSomalierFingerprints,
-    RunCrossTypeIdentityChecks,
     SomalierPedigreeCheck,
+    SomalierSelfCheck,
 )
 
 from cpg_flow.workflow import run_workflow
@@ -22,7 +22,7 @@ def cli_main() -> None:
     parser.add_argument('--dry_run', action='store_true', help='Dry run')
     args = parser.parse_args()
 
-    stages = [GenerateMissingSomalierFingerprints, RunCrossTypeIdentityChecks, SomalierPedigreeCheck]
+    stages = [GenerateMissingSomalierFingerprints, SomalierSelfCheck, SomalierPedigreeCheck]
     run_workflow(name='rd_qc', stages=stages, dry_run=args.dry_run)
 
 

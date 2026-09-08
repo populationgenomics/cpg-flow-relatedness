@@ -8,7 +8,7 @@ description='Somalier Checks and eventually other QC checks for CPG-Flow'
 readme = "README.md"
 # currently cpg-flow is pinned to this version
 requires-python = ">=3.10,<3.12"
-version="0.1.5"
+version="0.2.0"
 license={ "file" = "LICENSE" }
 classifiers=[
     'Environment :: Console',
@@ -56,6 +56,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ['test']
+# a local .venv often holds a stale non-editable rd_qc; without this the tests import that instead
+pythonpath = ['src']
 
 [tool.ruff]
 line-length = 120
@@ -96,7 +98,7 @@ cpg = ["metamist", "cpg_utils", "cpg_flow"]
 hail = ["hail"]
 
 [tool.bumpversion]
-current_version = "0.1.5"
+current_version = "0.2.0"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 commit = true

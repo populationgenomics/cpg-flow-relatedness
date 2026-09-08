@@ -4,7 +4,6 @@ Runs somalier extract on each input file and registers the result in metamist.
 """
 
 from google.api_core.exceptions import NotFound
-from google.cloud import storage as gcs
 from hailtop.batch.job import Job
 
 from rd_qc.utils import get_gcs_object_size
@@ -17,22 +16,22 @@ def register_analyses(output, analysis_type, cohort_ids, sg_ids, project_name, m
     complete_analysis_job(output, analysis_type, cohort_ids, sg_ids, project_name, meta)
 
 
-gcs_client = gcs.Client()
-
-
 def somalier_jobs(
+    dataset_name: str,
+    sg_id_map: dict[str, dict],
     somalier_targets: dict[str, str],
     somalier_outputs: dict[str, Path],
-    sg_id_map: dict[str, dict],
-    project: str,
 ) -> list[Job]:
     """
     For each SG needing a fingerprint, run somalier extract and register the result.
 
     Args:
+        dataset_name: dataset name for registration
+        sg_id_map: mapping from sg_id to metadata including sample_external_id and participant_external_id
         somalier_targets: {sg_id: source_file_path} — files to extract from
         somalier_outputs: {sg_id: output .somalier path} — where to write outputs
-        project: metamist project name for registration
+    Returns:
+        list[Job]: list of batch jobs created for somalier extraction and registration
     """
     batch_instance = hail_batch.get_batch()
     ref = hail_batch.fasta_res_group(batch_instance)
@@ -40,16 +39,16 @@ def somalier_jobs(
 
     jobs = []
     for sg_id, source_file in somalier_targets.items():
-        output_path = somalier_outputs[sg_id]
-        sample_id = sg_id_map[sg_id]['sample_external_id']
-        participant_id = sg_id_map[sg_id]['participant_external_id']
+        output_path = str(somalier_outputs[sg_id])
+        sample_external_id = sg_id_map[sg_id]['sample_external_id']
+        participant_external_id = sg_id_map[sg_id]['participant_external_id']
         j = batch_instance.new_bash_job(
-            f'{project} Somalier extract {sg_id} | {sample_id} | {participant_id}',
+            f'{dataset_name} Somalier extract {sg_id} | {sample_external_id} | {participant_external_id}',
             {'tool': 'somalier', 'sg': sg_id},
         )
         j.image(config.config_retrieve(['images', 'somalier']))
         try:
-            storage_gb = get_gcs_object_size(source_file, gcs_client)
+            storage_gb = get_gcs_object_size(source_file)
         except NotFound:
             storage_gb = 50
         j.storage(f'{storage_gb}GiB')
@@ -71,7 +70,7 @@ def somalier_jobs(
         mv extracted/*.somalier {j.output_file}
         """)
 
-        batch_instance.write_output(j.output_file, str(output_path))
+        batch_instance.write_output(j.output_file, output_path)
 
         registration_job = batch_instance.new_python_job(
             f'Register somalier {sg_id}',
@@ -81,12 +80,12 @@ def somalier_jobs(
 
         registration_job.call(
             register_analyses,
-            output=str(output_path),
+            output=output_path,
             analysis_type='somalier',
             cohort_ids=[],
             sg_ids=[sg_id],
-            project_name=project,
-            meta={},
+            project_name=dataset_name,
+            meta={'sample_external_id': sample_external_id, 'participant_external_id': participant_external_id},
         )
         registration_job.depends_on(j)
 
