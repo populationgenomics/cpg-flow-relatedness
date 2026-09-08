@@ -62,7 +62,7 @@ def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel
     )
 
 
-def _check_sex(samples_df) -> dict[str, SomalierSexInferenceFlag]:
+def _check_sex(samples_df: pd.DataFrame) -> dict[str, SomalierSexInferenceFlag]:
     info('*Inferred vs. reported sex:*')
     samples_df.sex = samples_df.sex.apply(lambda x: {1: 'male', 2: 'female'}.get(x, 'unknown'))
     samples_df.original_pedigree_sex = samples_df.original_pedigree_sex.apply(lambda x: {'-9': 'unknown'}.get(x, x))
@@ -94,7 +94,7 @@ def _check_sex(samples_df) -> dict[str, SomalierSexInferenceFlag]:
         for _, row in samples_df[mismatching_sex].iterrows()
     }
 
-    def _print_stats(df_filter) -> None:
+    def _print_stats(df_filter: pd.Series) -> None:
         for _, row_ in samples_df[df_filter].iterrows():
             info(
                 f' {row_.sample_id} ('
