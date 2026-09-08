@@ -26,7 +26,8 @@ def convert_to_web_url(path: Path, dataset: targets.Dataset) -> str:
 @stage.stage()
 class GenerateMissingSomalierFingerprints(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
-        index = get_project_sgs_and_fingerprints(dataset.name)
+        dataset_name = config.dataset_for_access_level(dataset.name)
+        index = get_project_sgs_and_fingerprints(dataset_name)
         outputs: dict[str, Path] = {}
 
         for info in index.by_sg.values():
@@ -36,7 +37,7 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         missing_sgids = find_sgids_without_somalier(index)
         if missing_sgids:
             extract_targets, _ = select_somalier_extract_targets(
-                dataset.name,
+                dataset_name,
                 tuple(sorted(missing_sgids)),
             )
             for sg_id, source_file in extract_targets.items():
@@ -47,14 +48,15 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
         outputs = self.expected_outputs(dataset)
 
-        index = get_project_sgs_and_fingerprints(dataset.name)
+        dataset_name = config.dataset_for_access_level(dataset.name)
+        index = get_project_sgs_and_fingerprints(dataset_name)
         missing_sgids = find_sgids_without_somalier(index)
 
         if not missing_sgids:
             return self.make_outputs(dataset, data=outputs)
 
         extract_targets, sg_id_map = select_somalier_extract_targets(
-            dataset.name,
+            dataset_name,
             tuple(sorted(missing_sgids)),
         )
 
@@ -62,10 +64,10 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
         somalier_outputs = {sg_id: outputs[sg_id] for sg_id in extract_targets}
 
         jobs = generate_somalier.somalier_jobs(
+            dataset_name=dataset_name,
+            sg_id_map=sg_id_map,
             somalier_targets=extract_targets,
             somalier_outputs=somalier_outputs,
-            sg_id_map=sg_id_map,
-            project=config.dataset_for_access_level(dataset.name),
         )
 
         return self.make_outputs(dataset, data=outputs, jobs=jobs)
@@ -74,7 +76,8 @@ class GenerateMissingSomalierFingerprints(stage.DatasetStage):
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints])
 class SomalierSelfCheck(stage.DatasetStage):
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
-        index = get_project_sgs_and_fingerprints(dataset.name)
+        dataset_name = config.dataset_for_access_level(dataset.name)
+        index = get_project_sgs_and_fingerprints(dataset_name)
         output_prefix = dataset.prefix() / 'identity_checks'
         web_output_prefix = dataset.web_prefix() / 'identity_checks'
 
@@ -100,8 +103,9 @@ class SomalierSelfCheck(stage.DatasetStage):
         if not outputs:
             return self.make_outputs(dataset, data=outputs)
 
+        dataset_name = config.dataset_for_access_level(dataset.name)
         all_somalier = inputs.as_dict(dataset, GenerateMissingSomalierFingerprints)
-        index = get_project_sgs_and_fingerprints(dataset.name)
+        index = get_project_sgs_and_fingerprints(dataset_name)
 
         missing_participants = {
             pid
@@ -122,11 +126,11 @@ class SomalierSelfCheck(stage.DatasetStage):
             if len(somalier_paths) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
-            jobs = relate.identity_check_jobs(
+            jobs = relate.self_relatedness_jobs(
+                dataset_name=dataset_name,
                 participant_id=participant_id,
-                outputs=outputs,
                 somalier_paths=somalier_paths,
-                dataset_name=config.dataset_for_access_level(dataset.name),
+                outputs=outputs,
                 job_attrs={'participant': participant_id},
             )
             all_jobs.extend(jobs)

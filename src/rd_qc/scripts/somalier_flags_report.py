@@ -13,13 +13,13 @@ from time import perf_counter
 import jinja2
 from loguru import logger
 
+from rd_qc.utils import SomalierFlag
+
 from cpg_utils import to_path
 from cpg_utils.config import config_retrieve, dataset_for_access_level
 from cpg_utils.metamist_registration import create_new
 from cpg_utils.slack import send_message
 from metamist.graphql import gql, query
-
-from rd_qc.utils import SomalierFlag
 
 STAGE_NAME = 'GenerateSomalierFlagsReport'
 JINJA_TEMPLATE_DIR = Path(__file__).absolute().parent.parent / 'templates'
@@ -264,8 +264,8 @@ def render_report(dataset: str, reports: list[SGReport], summary: dict) -> str:
 
 def construct_summary_message(  # noqa: PLR0917
     dataset: str,
-    out_html_url: str,
-    somalier_url: str,
+    flags_html_url: str,
+    somalier_html_url: str,
     seq_type: str,
     seq_tech: str,
     summary: dict,
@@ -277,10 +277,10 @@ def construct_summary_message(  # noqa: PLR0917
 
 def main(
     dataset: str,
-    output: str,
-    timestamped_output: str,
-    out_html_url: str,
-    somalier_url: str,
+    output_html: str,
+    base_output_html: str,
+    flags_html_url: str,
+    somalier_html_url: str
 ) -> None:
     """Query Metamist for Somalier flags and generate a Somalier flags HTML report."""
 
@@ -320,13 +320,13 @@ def main(
     html = render_report(dataset, reports, summary=summary)
     logger.info(f'{logging_prefix} :: Rendered report in {perf_counter() - started:.1f}s')
 
-    with to_path(output).open('w') as f:
+    with to_path(base_output_html).open('w') as f:
         f.write(html)
-    logger.info(f'{logging_prefix} :: Wrote SG QC report to {output}')
+    logger.info(f'{logging_prefix} :: Wrote Somalier flags report to {base_output_html}')
 
-    with to_path(timestamped_output).open('w') as f:
+    with to_path(output_html).open('w') as f:
         f.write(html)
-    logger.info(f'{logging_prefix} :: Wrote timestamped SG QC report to {timestamped_output}')
+    logger.info(f'{logging_prefix} :: Wrote timestamped Somalier flags report to {output_html}')
 
     # Register results in Metamist manually to capture all dataset SGs in scope, not just the input_cohorts SGs
     meta = {
@@ -339,18 +339,20 @@ def main(
 
     create_new(
         project=dataset,
-        output=timestamped_output,
+        output=output_html,
         analysis_type='web',
         sgs=[sg['id'] for sg in sequencing_groups],
         meta=meta,
     )
     logger.info(f'{logging_prefix} :: Registered web analysis for {len(sequencing_groups)} SG(s)')
+    logger.info(f'{logging_prefix} :: {flags_html_url}')
+    logger.info(f'{logging_prefix} :: {somalier_html_url}')
 
     meta.pop('summary')
     construct_summary_message(
         dataset,
-        out_html_url,
-        somalier_url,
+        flags_html_url,
+        somalier_html_url,
         seq_type,
         seq_tech,
         summary,
@@ -362,15 +364,15 @@ def main(
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dataset', required=True, help='Metamist dataset/project name')
-    parser.add_argument('--fixed-output', required=True, help='Path to write the HTML report')
-    parser.add_argument('--timestamped-output', required=True, help='Path to write the timestamped HTML report')
-    parser.add_argument('--html-url', required=True, help='Clickable URL for the Somalier flags HTML report')
-    parser.add_argument('--somalier-url', required=True, help='Clickable URL for the original Somalier report')
+    parser.add_argument('--output-html', required=True, help='gs:// path to HTML (namespaced by timestamp)')
+    parser.add_argument('--base-output-html', required=True, help='gs:// path to HTML (fixed, not namespaced)')
+    parser.add_argument('--flags-html-url', required=True, help='Clickable URL for the Somalier flags report')
+    parser.add_argument('--somalier-html-url', required=True, help='Clickable URL for the original Somalier report')
     args = parser.parse_args()
     main(
         dataset=args.dataset,
-        output=args.fixed_output,
-        timestamped_output=args.timestamped_output,
-        out_html_url=args.html_url,
-        somalier_url=args.somalier_url
+        output_html=args.output_html,
+        base_output_html=args.base_output_html,
+        flags_html_url=args.flags_html_url,
+        somalier_html_url=args.somalier_html_url
     )

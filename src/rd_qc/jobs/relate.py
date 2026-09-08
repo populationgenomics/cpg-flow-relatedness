@@ -7,11 +7,23 @@ from hailtop.batch.job import BashJob
 from cpg_utils import Path, config, hail_batch
 
 
-def identity_check_jobs(
-    participant_id: str,
-    outputs: dict[str, Path | str],
-    somalier_paths: dict[str, str | Path],
+def _get_out_html_url(dataset_name: str, html_path: Path | str) -> str:
+    """
+    Convert a gs:// web-bucket path to the http(s) web URL.
+    """
+    # Important - strip -test from dataset suffix before constructing the web URL
+    dataset_name = dataset_name.removesuffix('-test')
+    return str(html_path).replace(
+        config.config_retrieve(['storage', dataset_name, 'web']),
+        config.config_retrieve(['storage', dataset_name, 'web_url']),
+    )
+
+
+def self_relatedness_jobs(
     dataset_name: str,
+    participant_id: str,
+    somalier_paths: dict[str, str | Path],
+    outputs: dict[str, Path | str],
     job_attrs: dict[str, str],
 ) -> list[BashJob]:
     """
@@ -56,10 +68,7 @@ def identity_check_jobs(
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = str(outputs[f'{participant_id}_html']).replace(
-        config.config_retrieve(['storage', dataset_name, 'web']),
-        config.config_retrieve(['storage', dataset_name, 'web_url']),
-    )
+    out_html_url = _get_out_html_url(dataset_name, outputs[f'{participant_id}_html'])
 
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
@@ -134,11 +143,7 @@ def pedigree_check_jobs(  # noqa: PLR0917
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = str(outputs['html']).replace(
-        config.config_retrieve(['storage', dataset_name, 'web']),
-        config.config_retrieve(['storage', dataset_name, 'web_url']),
-    )
-    dataset_name = config.dataset_for_access_level(dataset_name)
+    out_html_url = _get_out_html_url(dataset_name, outputs['html'])
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\
@@ -174,8 +179,8 @@ touch {check_j.output}
 
 def record_somalier_flags_job(  # noqa: PLR0917
     dataset_name: str,
-    tmp_prefix: Path,
     sg_ids: str,
+    tmp_prefix: Path,
     somalier_self_relatedness_json_paths: list[Path | str],
     somalier_relatedness_json: str,
     job_attrs: dict | None = None,
@@ -191,12 +196,13 @@ def record_somalier_flags_job(  # noqa: PLR0917
 
     record_j.image(config.config_retrieve(['workflow', 'driver_image']))
 
+    # Read in all the self-relatedness JSON files for the SGs
     file_list_path = tmp_prefix / f'{dataset_name}_somalier-self-relatedness-file-list.txt'
     with file_list_path.open('w') as f:
         f.writelines([f'{p}\n' for p in somalier_self_relatedness_json_paths])
-
     somalier_self_relatedness_jsons = batch_instance.read_input(file_list_path)
 
+    # Read in the full relatedness JSON file for the dataset
     somalier_relatedness_json = batch_instance.read_input(somalier_relatedness_json)
 
     cmd = f"""\
@@ -205,9 +211,9 @@ def record_somalier_flags_job(  # noqa: PLR0917
 
     python3 -m rd_qc.scripts.record_somalier_flags \\
     --dataset {dataset_name} \\
+    --sg-ids {sg_ids} \\
     --somalier-self-relatedness-json-dir self_relatedness_jsons \\
-    --somalier-relatedness-json-path {somalier_relatedness_json} \\
-    --sg-ids {sg_ids}
+    --somalier-relatedness-json-path {somalier_relatedness_json}
     """
 
     record_j.command(cmd)

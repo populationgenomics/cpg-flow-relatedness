@@ -365,9 +365,9 @@ def reconcile_sg_somalier_flags(
 
 def main(
     dataset: str,
+    sg_ids: list[str],
     somalier_self_relatedness_json_dir: str,
     somalier_relatedness_json_path: str,
-    sg_ids: list[str],
 ):
     """
     Reads the qc flags JSON file and the SG mapping file, and updates any flagged QC issues in the
@@ -415,6 +415,7 @@ if __name__ == '__main__':
         required=True,
         help='Dataset name',
     )
+    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
     parser.add_argument(
         '--somalier-self-relatedness-json-dir',
         required=True,
@@ -425,11 +426,10 @@ if __name__ == '__main__':
         required=True,
         help='Path to somalier relatedness JSON file',
     )
-    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
     args = parser.parse_args()
     main(
         dataset=args.dataset,
+        sg_ids=args.sg_ids,
         somalier_self_relatedness_json_dir=args.somalier_self_relatedness_json_dir,
         somalier_relatedness_json_path=args.somalier_relatedness_json_path,
-        sg_ids=args.sg_ids,
     )
