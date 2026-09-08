@@ -47,10 +47,11 @@ def write_result_json(  # noqa: PLR0917
 
 
 def run(  # noqa: PLR0917
-    pairs_fpath: str,
-    participant_external_id: str,
     dataset: str,
+    participant_external_id: str,
     sg_ids: list[str],
+    somalier_pairs: str,
+    somalier_samples: str,
     output_pairs: str,
     output_samples: str,
     output_html: str,
@@ -74,7 +75,7 @@ def run(  # noqa: PLR0917
     low_relatedness_pairs: list[dict[str, Any]] = []
 
     try:
-        with open(pairs_fpath) as f:
+        with open(somalier_pairs) as f:
             reader = csv.DictReader(f, delimiter='\t')
             for row in reader:
                 relatedness = float(row['relatedness'])
@@ -89,8 +90,14 @@ def run(  # noqa: PLR0917
                         },
                     )
     except FileNotFoundError:
-        logger.warning(f'Pairs file not found: {pairs_fpath} — skipping')
+        logger.warning(f'Pairs file not found: {somalier_pairs} — skipping')
         return
+
+    # Write the files out
+    with to_path(output_samples).open('w') as f:
+        f.write(to_path(somalier_samples).read_text())
+    with to_path(output_pairs).open('w') as f:
+        f.write(to_path(somalier_pairs).read_text())
 
     passed = len(low_relatedness_pairs) == 0
     if passed:
@@ -174,25 +181,28 @@ def run(  # noqa: PLR0917
         secondary={'samples': output_samples, 'html': output_html, 'json': output_json},
     )
     logger.info(f'Registered somalier_relate analysis for participant {participant_external_id}')
+    logger.info(html_url)
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--pairs-tsv', required=True)
-    parser.add_argument('--participant-id', required=True)
     parser.add_argument('--dataset', required=True)
+    parser.add_argument('--participant-id', required=True, help='External ID of the participant')
     parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
-    parser.add_argument('--output-pairs', required=True)
-    parser.add_argument('--output-samples', required=True)
+    parser.add_argument('--somalier-pairs', required=True, help='Somalier pairs.tsv file from relate job')
+    parser.add_argument('--somalier-samples', required=True, help='Somalier samples.tsv file from relate job')
+    parser.add_argument('--output-pairs', required=True, help='gs:// path to output pairs TSV')
+    parser.add_argument('--output-samples', required=True, help='gs:// path to output samples TSV')
     parser.add_argument('--output-html', required=True, help='gs:// path to HTML report')
     parser.add_argument('--html-url', required=True, help='Web-accessible URL for HTML report')
-    parser.add_argument('--output-json', required=True, help='JSON output file for results')
+    parser.add_argument('--output-json', required=True, help='gs:// path to JSON output for results')
     args = parser.parse_args()
     run(
-        pairs_fpath=args.pairs_tsv,
-        participant_external_id=args.participant_id,
         dataset=args.dataset,
+        participant_external_id=args.participant_id,
         sg_ids=args.sg_ids,
+        somalier_pairs=args.somalier_pairs,
+        somalier_samples=args.somalier_samples,
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,
         output_html=args.output_html,

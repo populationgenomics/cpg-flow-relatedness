@@ -63,10 +63,11 @@ def identity_check_jobs(
 
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
-    --pairs-tsv {relate_j.output['pairs.tsv']} \\
-    --participant-id {participant_id} \\
     --dataset {dataset_name} \\
+    --participant-id {participant_id} \\
     --sg-ids {sg_ids_str} \\
+    --somalier-pairs {relate_j.output['pairs.tsv']} \\
+    --somalier-samples {relate_j.output['samples.tsv']} \\
     --output-pairs {outputs[f'{participant_id}_pairs_tsv']!s} \\
     --output-samples {outputs[f'{participant_id}_samples_tsv']!s} \\
     --output-html {outputs[f'{participant_id}_html']!s} \\
@@ -141,17 +142,17 @@ def pedigree_check_jobs(  # noqa: PLR0917
 
     cmd = f"""\
 python3 -m rd_qc.scripts.check_pedigree \\
-    --somalier-samples {relate_j.output['samples.tsv']} \\
-    --somalier-pairs {relate_j.output['pairs.tsv']} \\
-    --ped {ped_input} \\
-    --html-url {out_html_url} \\
     --dataset {dataset_name} \\
     --title "{title}" \\
     --sg-ids {sg_ids_str} \\
+    --expected-ped {ped_input} \\
+    --somalier-samples {relate_j.output['samples.tsv']} \\
+    --somalier-pairs {relate_j.output['pairs.tsv']} \\
     --output-pairs {outputs['pairs']!s} \\
     --output-samples {outputs['samples']!s} \\
     --output-html {outputs['html']!s} \\
     --base-output-html {outputs['base_html_url']!s} \\
+    --html-url {out_html_url} \\
     --output-json {outputs['json']!s}
 touch {check_j.output}
 """

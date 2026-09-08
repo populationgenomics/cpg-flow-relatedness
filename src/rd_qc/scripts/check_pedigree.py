@@ -227,29 +227,29 @@ def _check_relatedness(
 
 
 def run(  # noqa: PLR0917
-    somalier_samples_fpath: str,
-    somalier_pairs_fpath: str,
-    expected_ped_fpath: str,
+    dataset: str,
     title: str,
     sg_ids: list[str],
+    expected_ped: str,
+    somalier_pairs: str,
+    somalier_samples: str,
     output_pairs: str,
     output_samples: str,
     output_html: str,
-    html_url: str,
     base_output_html: str,
-    dataset: str,
+    html_url: str,
     output_json: str,
 ):
     """Report pedigree inconsistencies, given somalier outputs."""
 
     dataset = get_metamist().get_metamist_proj(dataset)
 
-    logger.info(somalier_samples_fpath)
-    samples_df = pd.read_csv(somalier_samples_fpath, delimiter='\t')
-    pairs_df = pd.read_csv(somalier_pairs_fpath, delimiter='\t')
-    with to_path(somalier_samples_fpath).open() as f:
+    logger.info(somalier_samples)
+    samples_df = pd.read_csv(somalier_samples, delimiter='\t')
+    pairs_df = pd.read_csv(somalier_pairs, delimiter='\t')
+    with to_path(somalier_samples).open() as f:
         inferred_ped = Ped(f)
-    with to_path(expected_ped_fpath).open() as f:
+    with to_path(expected_ped).open() as f:
         expected_ped = Ped(f)
 
     bad = samples_df.gt_depth_mean == 0.0
@@ -273,8 +273,8 @@ def run(  # noqa: PLR0917
     print_contents(
         samples_df,
         pairs_df,
-        somalier_samples_fpath,
-        somalier_pairs_fpath,
+        somalier_samples,
+        somalier_pairs,
     )
 
     if dataset and html_url:
@@ -305,9 +305,9 @@ def run(  # noqa: PLR0917
             json.dump(result, f, indent=2)
 
     with to_path(output_samples).open('w') as f:
-        f.write(to_path(somalier_samples_fpath).read_text())
+        f.write(to_path(somalier_samples).read_text())
     with to_path(output_pairs).open('w') as f:
-        f.write(to_path(somalier_pairs_fpath).read_text())
+        f.write(to_path(somalier_pairs).read_text())
 
     # Now create the web analysis for the whole dataset
     create_new(
@@ -354,42 +354,42 @@ def print_contents(
 
 if __name__ == '__main__':
     parser = ArgumentParser()
+    parser.add_argument('--dataset', help='Dataset name')
+    parser.add_argument('--title', required=True, help='Report title')
+    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
+    parser.add_argument(
+        '--expected-ped',
+        required=True,
+        help='PED file with expected pedigree',
+    )
     parser.add_argument(
         '--somalier-samples',
         required=True,
-        help='Path to somalier {prefix}.samples.tsv output file',
+        help='Somalier samples.tsv file from relate job',
     )
     parser.add_argument(
         '--somalier-pairs',
         required=True,
-        help='Path to somalier {prefix}.pairs.tsv output file',
+        help='Somalier pairs.tsv file from relate job',
     )
-    parser.add_argument(
-        '--ped',
-        required=True,
-        help='Path to PED file with expected pedigree',
-    )
-    parser.add_argument('--title', required=True, help='Report title')
-    parser.add_argument('--html-url', help='Web-accessible HTML path (namespaced by AR GUID)')
-    parser.add_argument('--dataset', help='Dataset name')
-    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
-    parser.add_argument('--output-pairs', required=True)
-    parser.add_argument('--output-samples', required=True)
+    parser.add_argument('--output-pairs', required=True, help='gs:// path to output pairs TSV')
+    parser.add_argument('--output-samples', required=True, help='gs:// path to output samples TSV')
     parser.add_argument('--output-html', required=True, help='gs:// path to HTML (namespaced by AR GUID)')
     parser.add_argument('--base-output-html', required=True, help='gs:// path to HTML (fixed, not namespaced)')
-    parser.add_argument('--output-json', required=True, help='JSON output file for results')
+    parser.add_argument('--html-url', help='Web-accessible HTML path (namespaced by AR GUID)')
+    parser.add_argument('--output-json', required=True, help='gs:// path to JSON output for results')
     args = parser.parse_args()
     run(
-        somalier_samples_fpath=args.somalier_samples,
-        somalier_pairs_fpath=args.somalier_pairs,
-        expected_ped_fpath=args.ped,
-        html_url=args.html_url,
         dataset=args.dataset,
         title=args.title,
         sg_ids=args.sg_ids,
+        expected_ped=args.expected_ped,
+        somalier_pairs=args.somalier_pairs,
+        somalier_samples=args.somalier_samples,
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,
         output_html=args.output_html,
         base_output_html=args.base_output_html,
+        html_url=args.html_url,
         output_json=args.output_json,
     )
