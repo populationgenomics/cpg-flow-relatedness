@@ -281,7 +281,7 @@ def reconcile_sg_somalier_flags(
     """
     sg_id = sg['id']
     report = 'Somalier'
-    # Get all the existing QC flags of the specified type for this SG
+    # Get all the existing relatedness flags of the specified type for this SG
     somalier_flags_key = 'somalier_flags'
 
     current_somalier_flags: list[dict] = (sg['meta'] or {}).get(somalier_flags_key, [])
@@ -370,7 +370,7 @@ def main(
     somalier_relatedness_json_path: str,
 ):
     """
-    Reads the qc flags JSON file and the SG mapping file, and updates any flagged QC issues in the
+    Reads the relatedness flags JSON file and the SG mapping file, and updates any flagged issues in the
     sequencing group meta in Metamist. The mapping file is required to ensure that the SG was in
     scope for the dataset being processed and to avoid updating unrelated SGs.
 

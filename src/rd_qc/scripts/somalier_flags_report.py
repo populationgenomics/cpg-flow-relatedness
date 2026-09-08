@@ -99,7 +99,7 @@ class SGInfo:
 
 @dataclass(frozen=True)
 class SGReport:
-    """All QC flags for a single sequencing group, plus its metadata."""
+    """All relatedness flags for a single sequencing group, plus its metadata."""
 
     sg_info: SGInfo
     somalier_flags: list[SomalierFlag]

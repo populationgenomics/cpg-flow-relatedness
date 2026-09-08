@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QC Flag Summary — {{ dataset }}</title>
+    <title>Somalier Relatedness Flag Summary — {{ dataset }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -238,9 +238,9 @@
 {% endmacro %}
 
 <div class="container">
-    <h1>QC Flag Summary</h1>
+    <h1>Somalier Relatedness Flag Summary</h1>
     <p class="subtitle">{{ dataset }} &mdash; generated {{ generated_at }}</p>
-    <p class="blurb">A summary of the sequencing-QC issues flagged by analysis of MultiQC report data.</p>
+    <p class="blurb">A summary of the relatedness issues flagged by analysis of Somalier report data.</p>
 
     <div class="summary-cards">
         <div class="card">
@@ -311,7 +311,7 @@
             {{ flag_table(unresolved, resolved=False) }}
         </div>
     {% else %}
-        <div class="all-clear">✓ All clear — no active QC flags{% if summary.resolved_flags %} ({{ summary.resolved_flags }} previously resolved){% endif %}.</div>
+        <div class="all-clear">✓ All clear — no active flags{% if summary.resolved_flags %} ({{ summary.resolved_flags }} previously resolved){% endif %}.</div>
     {% endif %}
 
     {# ------------------------------------------------------------------ #}
