@@ -19,7 +19,13 @@ import pandas as pd
 from loguru import logger
 from peddy import Ped, Sample
 
-from rd_qc.utils import SomalierFlag, SomalierRelatednessFlag, SomalierSexInferenceFlag, is_pedigree_refinement
+from rd_qc.utils import (
+    SomalierFlag,
+    SomalierRelatednessFlag,
+    SomalierSexInferenceFlag,
+    is_pedigree_refinement,
+    refine_expected_relationship,
+)
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
@@ -206,14 +212,20 @@ def _check_relatedness(
         inferred_ped_s1 = inferred_ped_sample_by_id.get(s1, {})
         inferred_ped_s2 = inferred_ped_sample_by_id.get(s2, {})
         with contextlib.redirect_stderr(None), contextlib.redirect_stdout(None):
-            if expected_ped_s1 and expected_ped_s2:
-                expected_rel = expected_ped.relation(expected_ped_s1, expected_ped_s2)
-            else:
-                expected_rel = 'unknown'
             if inferred_ped_s1 and inferred_ped_s2:
                 inferred_rel = inferred_ped.relation(inferred_ped_s1, inferred_ped_s2)
             else:
                 inferred_rel = 'unknown'
+            if expected_ped_s1 and expected_ped_s2:
+                # Needs inferred_rel, so it must be computed first.
+                expected_rel = refine_expected_relationship(
+                    expected_ped.relation(expected_ped_s1, expected_ped_s2),
+                    inferred_rel,
+                    expected_ped_s1.family_id,
+                    expected_ped_s2.family_id,
+                )
+            else:
+                expected_rel = 'unknown'
 
         if inferred_rel != expected_rel:
             # Make sure that the s1 / s2 sample IDs are sorted to ensure consistent keying

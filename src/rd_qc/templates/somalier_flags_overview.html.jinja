@@ -87,8 +87,30 @@
         .flag-detail-table { box-shadow: none; margin: 0 0 8px; }
         .flag-detail-table th { background: #eee; font-size: 0.72rem; }
         .flag-detail-table td { font-size: 0.83rem; }
-        .metrics { color: #636e72; font-size: 0.8rem; }
-        .metrics .metric-name { color: #b2bec3; }
+
+        /* Each SG in a flag: participant leads, sample next, CPG id demoted. External
+           collaborators read participant and sample IDs; the CPG id is internal reference. */
+        .member { margin-bottom: 6px; }
+        .member:last-child { margin-bottom: 0; }
+        .member-participant { font-weight: 600; color: #2d3436; }
+        .member-sample { color: #636e72; font-size: 0.8rem; }
+        .member-sgid { color: #b2bec3; font-size: 0.72rem;
+                       font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+        /* Expected above inferred, on their own lines, label narrow and muted. */
+        dl.verdict { display: grid; grid-template-columns: 4.5rem 1fr; gap: 2px 8px; }
+        dl.verdict dt { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px;
+                        color: #b2bec3; align-self: baseline; }
+        dl.verdict dd { font-size: 0.83rem; color: #2d3436; }
+        dl.verdict dd.inferred { font-weight: 600; }
+
+        /* Measured values as an aligned label/value grid rather than a run-on line. */
+        dl.metrics { display: grid; grid-template-columns: auto auto; gap: 2px 10px;
+                     justify-content: start; }
+        dl.metrics dt { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px;
+                        color: #b2bec3; }
+        dl.metrics dd { font-size: 0.83rem; color: #2d3436;
+                        font-family: ui-monospace, Menlo, Consolas, monospace; }
 
         .sg-props { display: grid; grid-template-columns: repeat(5, auto); gap: 4px 24px;
                     margin: 4px 0 10px; }
@@ -174,15 +196,25 @@
                         <tr>
                             <td><span class="badge cat-{{ f.category_key }}">{{ f.category_label }}</span></td>
                             <td>
-                                <div class="subject">{{ f.subject }}</div>
-                                {% if f.subject_detail %}<div class="subject-detail">{{ f.subject_detail }}</div>{% endif %}
+                                {% for m in f.members %}
+                                <div class="member">
+                                    <div class="member-participant">{{ m.participant or dash }}</div>
+                                    <div class="member-sample">{{ m.sample or dash }}</div>
+                                    <div class="member-sgid">{{ m.sg_id }}</div>
+                                </div>
+                                {% endfor %}
                             </td>
                             <td>
-                                {{ f.result }}
+                                <dl class="verdict">
+                                    <dt>Expected</dt><dd>{{ f.expected }}</dd>
+                                    <dt>Inferred</dt><dd class="inferred">{{ f.inferred }}</dd>
+                                </dl>
                                 {% if f.cross_family %}<div class="cross-family">{{ cross_family_mark }} cross-family &rarr; {{ f.cross_family }}</div>{% endif %}
                             </td>
-                            <td class="metrics">
-                                {% for name, value in f.details %}<span class="metric-name">{{ name }}</span> {{ value }}{{ '' if loop.last else ' &nbsp;' }}{% endfor %}
+                            <td>
+                                <dl class="metrics">
+                                    {% for name, value in f.details %}<dt>{{ name }}</dt><dd>{{ value }}</dd>{% endfor %}
+                                </dl>
                             </td>
                             <td title="{{ f.resolution_date_full if is_resolved else f.date_full }}">
                                 {{ (f.resolution_date_short if is_resolved else f.date_short) or dash }}

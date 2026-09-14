@@ -195,3 +195,78 @@ def test_zero_depth_samples_are_excluded_from_both_checks(tmp_path):
         for f in fs
         if f.category == 'relatedness_mismatch'
     )
+
+
+def test_same_family_pairs_with_no_recorded_link_are_not_expected_unrelated(tmp_path):
+    """
+    Two family members with no blood path between them must not be flagged as 'expected unrelated'.
+
+    CPG001 and CPG002 are both in FAM1 with no parents recorded, so peddy calls them 'unrelated'.
+    The genotypes infer full siblings. Before the reframing this was a conflict claiming the
+    pedigree said they were unrelated, which it never did.
+    """
+    inputs = write_inputs(
+        tmp_path,
+        sample_rows=[
+            # somalier --infer reconstructs the sibship: both share the same two parents.
+            sample_row('CPG001', inferred_sex=MALE, provided_sex='male', paternal='CPG004', maternal='CPG005'),
+            sample_row('CPG002', inferred_sex=FEMALE, provided_sex='female', paternal='CPG004', maternal='CPG005'),
+            sample_row('CPG004', inferred_sex=MALE, provided_sex='male'),
+            sample_row('CPG005', inferred_sex=FEMALE, provided_sex='female'),
+        ],
+        pair_rows=[
+            pair_row('CPG001', 'CPG002', relatedness=0.49),
+            pair_row('CPG001', 'CPG004', relatedness=0.48),
+            pair_row('CPG001', 'CPG005', relatedness=0.51),
+            pair_row('CPG002', 'CPG004', relatedness=0.5),
+            pair_row('CPG002', 'CPG005', relatedness=0.49),
+            pair_row('CPG004', 'CPG005', relatedness=0.01),
+        ],
+        # The expected pedigree knows only that all four are in FAM1, with no links at all.
+        ped=(
+            'FAM1\tCPG001\t0\t0\t1\t1\n'
+            'FAM1\tCPG002\t0\t0\t2\t1\n'
+            'FAM1\tCPG004\t0\t0\t1\t1\n'
+            'FAM1\tCPG005\t0\t0\t2\t1\n'
+        ),
+    )
+
+    flags, _, _ = produce_flags(**inputs)
+    pedigree = [f for fs in flags.values() for f in fs if f.category == 'relatedness_mismatch']
+
+    assert pedigree, 'expected the missing links to still be flagged, just not as "unrelated"'
+    assert not [f for f in pedigree if f.expected_relationship == 'unrelated']
+    assert all(f.expected_relationship == 'related at unknown level' for f in pedigree)
+
+
+def test_cross_family_pairs_keep_expected_unrelated(tmp_path):
+    """
+    Two people in different families really are expected to be unrelated.
+
+    So the reframing must not touch them: a related inference across a family boundary is the
+    cross-family swap case, and it has to stay a conflict. Here somalier infers CPG001 and CPG002
+    as full siblings while the expected pedigree has them in FAM1 and FAM2 respectively.
+    """
+    inputs = write_inputs(
+        tmp_path,
+        sample_rows=[
+            sample_row('CPG001', inferred_sex=MALE, provided_sex='male', paternal='CPG004', maternal='CPG005'),
+            sample_row('CPG002', inferred_sex=FEMALE, provided_sex='female', paternal='CPG004', maternal='CPG005'),
+            sample_row('CPG004', inferred_sex=MALE, provided_sex='male'),
+            sample_row('CPG005', inferred_sex=FEMALE, provided_sex='female'),
+        ],
+        pair_rows=[pair_row('CPG001', 'CPG002', relatedness=0.47)],
+        ped=(
+            'FAM1\tCPG001\t0\t0\t1\t1\n'
+            'FAM2\tCPG002\t0\t0\t2\t1\n'
+            'FAM1\tCPG004\t0\t0\t1\t1\n'
+            'FAM1\tCPG005\t0\t0\t2\t1\n'
+        ),
+    )
+
+    flags, _, _ = produce_flags(**inputs)
+    pedigree = [f for fs in flags.values() for f in fs if f.category == 'relatedness_mismatch']
+
+    assert [(f.expected_relationship, f.inferred_relationship) for f in pedigree] == [
+        ('unrelated', 'full siblings')
+    ]

@@ -9,7 +9,12 @@ actually produces. 92 of those 163 are refinements.
 import pytest
 from peddy import Ped
 
-from rd_qc.utils import PEDDY_RELATIONSHIPS, UNSPECIFIED_RELATED, is_pedigree_refinement
+from rd_qc.utils import (
+    PEDDY_RELATIONSHIPS,
+    UNSPECIFIED_RELATED,
+    is_pedigree_refinement,
+    refine_expected_relationship,
+)
 
 # (expected, inferred, count observed on perth-neuro)
 REFINEMENTS = [
@@ -82,3 +87,48 @@ def test_peddy_vocabulary_is_pinned():
 def test_classification_is_total_over_the_vocabulary(expected, inferred):
     # Never raises, and always returns a bool, for every pair peddy can produce.
     assert isinstance(is_pedigree_refinement(expected, inferred), bool)
+
+
+# ---------------------------------------------------------------------------
+# Reinterpreting peddy's 'unrelated' within a family
+# ---------------------------------------------------------------------------
+def test_same_family_unrelated_becomes_related_at_unknown_level():
+    # peddy says 'unrelated' for two family members with no recorded blood path. All 66 of
+    # perth-neuro's 'expected unrelated' flags were this case, and none were cross-family.
+    assert refine_expected_relationship('unrelated', 'full siblings', 'FAM1', 'FAM1') == UNSPECIFIED_RELATED
+
+
+def test_cross_family_unrelated_is_left_alone():
+    # Genuinely unrelated, and a related inference here is the cross-family swap case.
+    assert refine_expected_relationship('unrelated', 'full siblings', 'FAM1', 'FAM2') == 'unrelated'
+
+
+def test_unrelated_with_an_unknown_family_is_left_alone():
+    assert refine_expected_relationship('unrelated', 'full siblings', None, None) == 'unrelated'
+    assert refine_expected_relationship('unrelated', 'full siblings', '', 'FAM1') == 'unrelated'
+
+
+@pytest.mark.parametrize('relation', sorted(PEDDY_RELATIONSHIPS - {'unrelated'}))
+def test_every_other_relationship_passes_through_untouched(relation):
+    # Only 'unrelated' is reinterpreted. In particular 'mom-dad' survives, which is what keeps
+    # consanguinity between two recorded parents visible as a conflict.
+    assert refine_expected_relationship(relation, 'full siblings', 'FAM1', 'FAM1') == relation
+
+
+def test_same_family_reframing_turns_a_false_alarm_into_a_refinement():
+    # The end-to-end effect: 'unrelated' -> 'full siblings' within one family was a conflict, and
+    # is now correctly a refinement, because the pedigree never claimed they were unrelated.
+    reframed = refine_expected_relationship('unrelated', 'full siblings', 'FAM1', 'FAM1')
+
+    assert is_pedigree_refinement('unrelated', 'full siblings') is False
+    assert is_pedigree_refinement(reframed, 'full siblings') is True
+
+
+def test_reframing_never_creates_a_mismatch_out_of_an_agreeing_pair():
+    """
+    Two family members with no recorded link whom somalier also calls unrelated agree, and must
+    keep agreeing. Reframing them to 'related at unknown level' would invent a conflict: on
+    perth-neuro that was 18 new conflicts drawn from pairs that previously matched, which is the
+    in-law case arriving as an alarm.
+    """
+    assert refine_expected_relationship('unrelated', 'unrelated', 'FAM1', 'FAM1') == 'unrelated'

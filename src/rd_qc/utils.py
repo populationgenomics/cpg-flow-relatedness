@@ -191,6 +191,41 @@ PEDDY_RELATIONSHIPS = frozenset(
 UNSPECIFIED_RELATED = 'related at unknown level'
 
 
+def refine_expected_relationship(
+    relation: str,
+    inferred: str,
+    family_1: str | None,
+    family_2: str | None,
+) -> str:
+    """
+    Reinterpret peddy's 'unrelated' for two individuals recorded in the same family.
+
+    peddy returns 'unrelated' whenever it finds no blood path between a pair, which includes two
+    members of one family whose connecting links simply are not recorded. Reporting that as
+    "expected unrelated" is wrong, and it generated a false alarm for every such pair: all 66 of
+    perth-neuro's 'expected unrelated' flags were same-family, and not one was cross-family. If
+    the pedigree puts two people in a family, the honest expectation is that they are related at
+    some unspecified level.
+
+    Note the `inferred` argument. The reframing applies only when the genotypes actually found a
+    relationship, so that it can never turn a matching pair into a mismatch. Two family members
+    with no recorded link whom somalier also calls unrelated agree, and must keep agreeing. Without
+    this guard the reframing invented 18 new conflicts on perth-neuro out of pairs that previously
+    matched, which is the in-law case below arriving as an alarm.
+
+    Co-parents are unaffected, because peddy reports a recorded mother and father as 'mom-dad'
+    rather than 'unrelated'. So a mother and father who turn out to be blood relatives still
+    surfaces as a conflict rather than being quietly demoted.
+
+    The known simplification: individuals related only by marriage, an aunt's husband say, really
+    are expected to be unrelated, but nothing in the pedigree distinguishes them from a missing
+    link. They are left unflagged, exactly as they were before.
+    """
+    if relation == 'unrelated' and inferred != 'unrelated' and family_1 and family_1 == family_2:
+        return UNSPECIFIED_RELATED
+    return relation
+
+
 def is_pedigree_refinement(expected: str, inferred: str) -> bool:
     """
     True when the inferred relationship fills a blank in the recorded pedigree rather than

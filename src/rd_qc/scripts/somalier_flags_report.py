@@ -159,6 +159,15 @@ class SgFlags:
 
 
 @dataclass(frozen=True)
+class Member:
+    """One sequencing group involved in a flag, identified the way a collaborator reads it."""
+
+    participant: str
+    sample: str
+    sg_id: str
+
+
+@dataclass(frozen=True)
 class FlagRow:
     """One display-ready flag line. Strings are built here, since Jinja autoescape is on."""
 
@@ -171,8 +180,16 @@ class FlagRow:
     # merely less specific. Refinements get their own de-emphasised section, because they
     # outnumber conflicts on real datasets and bury them.
     impact: str
+    # Compact identity for the inline glance line.
     subject: str
     subject_detail: str
+    # Per-member identity for the detail table, one entry per SG the flag involves. Collaborators
+    # know participants and samples, not CPG IDs, so those lead and the SG id is demoted.
+    members: tuple[Member, ...]
+    # 'Expected' / 'Inferred' rather than one joined string, so the template can put them on
+    # separate lines.
+    expected: str
+    inferred: str
     result: str
     details: tuple[tuple[str, str], ...]
     cross_family: str | None
@@ -478,11 +495,23 @@ def _group_targets(flag: SomalierFlag, owning_sg_id: str, infos: dict[str, SGInf
     return [_family_group(owning_sg_id, infos)]
 
 
+def _member(sg_id: str, infos: dict[str, SGInfo], participant_fallback: str = '') -> Member:
+    info = infos.get(sg_id)
+    return Member(
+        participant=(info.participant_external_id if info else '') or participant_fallback,
+        sample=(info.sample_external_id if info else '') or '',
+        sg_id=sg_id,
+    )
+
+
 def _sex_row_parts(flag: SomalierSexInferenceFlag, owning_sg_id: str, infos: dict[str, SGInfo]) -> dict:
-    participant = _participant_of(owning_sg_id, infos)
+    member = _member(owning_sg_id, infos)
     return {
-        'subject': f'{participant}{DOT_SEP}{owning_sg_id}' if participant else owning_sg_id,
+        'subject': f'{member.participant}{DOT_SEP}{owning_sg_id}' if member.participant else owning_sg_id,
         'subject_detail': '',
+        'members': (member,),
+        'expected': flag.provided,
+        'inferred': flag.inferred,
         'result': f'provided {flag.provided} / inferred {flag.inferred}',
         'details': (
             ('Mean depth', _fmt_num(flag.mean_depth)),
@@ -492,61 +521,60 @@ def _sex_row_parts(flag: SomalierSexInferenceFlag, owning_sg_id: str, infos: dic
             ('X sites', _fmt_num(flag.x_sites)),
             ('p middling AB', _fmt_num(flag.p_middling_ab)),
         ),
-        'search_extra': f'{participant} {owning_sg_id} {flag.provided} {flag.inferred}',
+        'search_extra': f'{member.participant} {member.sample} {owning_sg_id} {flag.provided} {flag.inferred}',
     }
 
 
 def _self_row_parts(flag: SomalierSelfRelatednessFlag, infos: dict[str, SGInfo]) -> dict:
+    members = (
+        _member(flag.sg_id_1, infos, flag.participant_external_id),
+        _member(flag.sg_id_2, infos, flag.participant_external_id),
+    )
     return {
         'subject': f'{flag.sg_id_1}{PAIR_SEP}{flag.sg_id_2}',
         'subject_detail': flag.participant_external_id,
-        'result': (
-            f'relatedness {_fmt_num(flag.relatedness)} (expected ~1.0, threshold {_fmt_num(flag.threshold)})'
-        ),
+        'members': members,
+        'expected': 'same individual, relatedness ~1.0',
+        'inferred': f'relatedness {_fmt_num(flag.relatedness)}',
+        'result': f'relatedness {_fmt_num(flag.relatedness)} (expected ~1.0, threshold {_fmt_num(flag.threshold)})',
         'details': (
             ('Relatedness', _fmt_num(flag.relatedness)),
             ('Threshold', _fmt_num(flag.threshold)),
             ('IBS0', _fmt_num(flag.ibs0)),
             ('IBS2', _fmt_num(flag.ibs2)),
-            ('Participant', flag.participant_external_id or DASH),
         ),
         'search_extra': ' '.join(
             [
-                flag.sg_id_1,
-                flag.sg_id_2,
                 flag.participant_external_id or '',
-                _participant_of(flag.sg_id_1, infos),
-                _participant_of(flag.sg_id_2, infos),
+                *(part for m in members for part in (m.participant, m.sample, m.sg_id)),
             ]
         ),
     }
 
 
 def _pedigree_row_parts(flag: SomalierRelatednessFlag, infos: dict[str, SGInfo]) -> dict:
-    participant_1 = _participant_of(flag.sg_id_1, infos)
-    participant_2 = _participant_of(flag.sg_id_2, infos)
-    detail = f'{participant_1}{PAIR_SEP}{participant_2}' if participant_1 and participant_2 else ''
+    members = (_member(flag.sg_id_1, infos), _member(flag.sg_id_2, infos))
+    participants = [m.participant for m in members if m.participant]
     return {
         'subject': f'{flag.sg_id_1}{PAIR_SEP}{flag.sg_id_2}',
-        'subject_detail': detail,
+        'subject_detail': PAIR_SEP.join(participants) if len(participants) == len(members) else '',
+        'members': members,
+        'expected': flag.expected_relationship or DASH,
+        'inferred': flag.inferred_relationship or DASH,
         'result': f'expected {flag.expected_relationship} / inferred {flag.inferred_relationship}',
+        # Expected and inferred are rendered in their own column, and the family is the group
+        # heading, so neither is repeated here.
         'details': (
             ('Relatedness', _fmt_num(flag.relatedness)),
             ('IBS0', _fmt_num(flag.ibs0)),
             ('IBS2', _fmt_num(flag.ibs2)),
-            ('Expected', flag.expected_relationship or DASH),
-            ('Inferred', flag.inferred_relationship or DASH),
-            ('Family (recorded)', flag.family_external_id or DASH),
         ),
         'search_extra': ' '.join(
             [
-                flag.sg_id_1,
-                flag.sg_id_2,
-                participant_1,
-                participant_2,
                 flag.family_external_id or '',
                 flag.expected_relationship or '',
                 flag.inferred_relationship or '',
+                *(part for m in members for part in (m.participant, m.sample, m.sg_id)),
             ]
         ),
     }
@@ -587,6 +615,9 @@ def _flag_to_row(
         impact='refinement' if refinement else 'conflict',
         subject=parts['subject'],
         subject_detail=parts['subject_detail'],
+        members=parts['members'],
+        expected=parts['expected'],
+        inferred=parts['inferred'],
         result=parts['result'],
         details=parts['details'],
         cross_family=cross_family,
