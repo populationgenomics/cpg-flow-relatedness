@@ -116,9 +116,8 @@ class SomalierFlag:
 
     category: str | None = None
     # Sorted, underscore-joined SG IDs this flag involves: 'CPG001' for per-SG flags,
-    # 'CPG002_CPG003' for pairwise ones. Set during reconciliation in record_somalier_flags.py,
-    # which is also where the per-category identity keys live. Defaults to '' so that flags
-    # already recorded in Metamist without the field still deserialise; readers fall back to
+    # 'CPG002_CPG003' for pairwise ones. Set during reconciliation in record_somalier_flags.py.
+    # Defaults to '' so older records without the field still deserialise; readers fall back to
     # deriving it from sg_id_1/sg_id_2.
     sequencing_group_key: str = ''
     date: str = field(default_factory=lambda: datetime.now(tz=UTC).isoformat(timespec='seconds'))
@@ -167,14 +166,13 @@ class SomalierRelatednessFlag(SomalierFlag):
     relatedness: float
     ibs0: int
     ibs2: int
-    # 'conflict' or 'refinement', from relatedness_verdict. Stored rather than re-derived so the
-    # report does not need the pedigree to classify a flag. Empty on flags recorded before this
-    # field existed; readers fall back to treating those as conflicts.
+    # 'conflict' or 'refinement', from relatedness_verdict. Stored so the report can classify a
+    # flag without the pedigree. Empty on older records; readers treat those as conflicts.
     verdict: str = ''
 
 
-# peddy's Ped.relation() vocabulary. Pinned here because the pedigree check classifies flags by
-# comparing these exact strings, so an upstream rename would silently reclassify everything.
+# peddy's Ped.relation() vocabulary. Pinned here because the pedigree check compares these exact
+# strings, so an upstream rename would silently reclassify flags.
 PEDDY_RELATIONSHIPS = frozenset(
     {
         'cousins',
@@ -190,9 +188,8 @@ PEDDY_RELATIONSHIPS = frozenset(
     }
 )
 
-# What peddy reports when the pedigree puts a pair in the same family but records no path between
-# them. Note it is not the string 'unknown', which is what our own code falls back to when a sample
-# is missing from the PED entirely.
+# What peddy reports for a pair in the same family with no recorded path between them. Distinct
+# from 'unknown', which is our own fallback for a sample missing from the PED entirely.
 UNSPECIFIED_RELATED = 'related at unknown level'
 
 
@@ -200,35 +197,22 @@ def refine_expected_relationship(relation: str, family_1: str | None, family_2: 
     """
     Reinterpret peddy's 'unrelated' for two individuals recorded in the same family.
 
-    peddy returns 'unrelated' whenever it finds no blood path between a pair, which includes two
-    members of one family whose connecting links simply are not recorded. Reporting that as
-    "expected unrelated" is wrong: all 66 of perth-neuro's 'expected unrelated' flags were
-    same-family and not one was cross-family. If the pedigree puts two people in a family, the
-    honest expectation is that they are related at some unspecified level.
+    peddy returns 'unrelated' for any pair with no blood path, including two members of one family
+    whose connecting links are simply not recorded. For those, the honest expectation is
+    relatedness at some unspecified level rather than "expected unrelated".
 
-    This only changes what the expectation is *called*. Whether that expectation is met is decided
-    by `relatedness_verdict`, which treats an unspecified expectation as satisfied by anything
-    short of two identical samples. So a pair of in-laws whom the genotypes also call unrelated
-    stays unflagged.
-
-    Co-parents are unaffected, because peddy reports a recorded mother and father as 'mom-dad'
-    rather than 'unrelated'. A mother and father who turn out to be blood relatives therefore
-    still surfaces as a conflict rather than being quietly demoted.
+    Only the name of the expectation changes; `relatedness_verdict` decides whether it is met.
+    Co-parents are unaffected, as peddy reports a recorded mother and father as 'mom-dad'.
     """
     if relation == 'unrelated' and family_1 and family_1 == family_2:
         return UNSPECIFIED_RELATED
     return relation
 
 
-# ---------------------------------------------------------------------------
-# Relatedness degrees, inferred from what somalier measured
-# ---------------------------------------------------------------------------
-# We derive the relationship ourselves from the kinship coefficient rather than reading somalier's
-# `--infer` reconstruction. somalier documents --infer as being for high quality sample pairs where
-# both parents are present, and CPG pedigrees frequently record only one parent, so it runs well
-# outside its envelope: on perth-neuro it renumbered the family id of 477 of 623 samples, invented
-# 114 parent links, and created 42 synthetic placeholder parents. peddy then faithfully read that
-# fabricated pedigree, which produced ~160 false flags while missing a genotypically identical pair.
+# Relatedness degrees, derived from the kinship coefficient rather than from somalier's `--infer`
+# pedigree reconstruction. --infer assumes high quality pairs with both parents present; pedigrees
+# with only one recorded parent make it rewrite family IDs and invent parent links, which any
+# downstream pedigree check then reads as truth.
 DEGREE_IDENTICAL = 'identical'
 DEGREE_PARENT_CHILD = 'parent-child'
 DEGREE_SIBLINGS = 'siblings'
@@ -238,14 +222,7 @@ DEGREE_UNRELATED = 'unrelated'
 
 # Kinship coefficient lower bounds. somalier reports relatedness on the 2*phi scale, where each
 # successive degree halves: identical 1.0, first-degree 0.5, second 0.25, third 0.125. The bounds
-# are the geometric midpoints between those expectations, which is both the principled split and
-# what perth-neuro's measured clusters support: parent-child 0.438..0.548 (n=215), full siblings
-# 0.430..0.554 (n=26), grandchild 0.203..0.306 (n=8), niece/nephew 0.204..0.296 (n=8).
-#
-# The second-degree bound matters most. Cross-family pairs, which the pedigree really does expect
-# to be unrelated, form a smooth background distribution with no upper cluster: median -0.006,
-# p99.9 0.072, max 0.158 over 99,515 pairs. So 0.177 sits in the genuine gap between that
-# background and the real second-degree cluster at 0.203+.
+# are the geometric midpoints between those expectations.
 IDENTICAL_MIN_RELATEDNESS = 0.90
 FIRST_DEGREE_MIN_RELATEDNESS = 0.354
 SECOND_DEGREE_MIN_RELATEDNESS = 0.177
@@ -253,9 +230,7 @@ THIRD_DEGREE_MIN_RELATEDNESS = 0.088
 
 # ibs0 splits the two first-degree relationships: a parent and child share an allele at every site,
 # so ibs0 is ~0, while full siblings inherit different alleles at some. Expressed as a fraction of
-# the sites compared so the threshold survives a different sites VCF. On perth-neuro parent-child
-# reached at most 0.0007 (ibs0 <= 12) and siblings never went below 0.012 (ibs0 >= 201), a clean
-# separation with no overlap, so this sits between them with margin on both sides.
+# the sites compared so the threshold survives a different sites VCF.
 PARENT_CHILD_MAX_IBS0_RATIO = 0.005
 
 
@@ -277,9 +252,8 @@ def infer_degree(relatedness: float, ibs0: int, sites: int) -> str:
     return DEGREE_UNRELATED
 
 
-# Which measured degrees are consistent with each relationship a pedigree can state. peddy's
-# 'siblings' means "shares at least one recorded parent", so it spans full and half siblings and
-# accepts either a first- or second-degree measurement.
+# Measured degrees consistent with each relationship a pedigree can state. peddy's 'siblings' means
+# "shares at least one recorded parent", so it spans full and half siblings.
 EXPECTED_DEGREES: dict[str, frozenset[str]] = {
     'parent-child': frozenset({DEGREE_PARENT_CHILD}),
     'full siblings': frozenset({DEGREE_SIBLINGS}),
@@ -309,11 +283,10 @@ def relatedness_verdict(relationship: str, measured: str) -> str:
     Whether a measured degree agrees with the pedigree, contradicts it, or fills a gap in it.
 
     `relationship` is the expected relationship after `refine_expected_relationship`, so an
-    unspecified expectation means the pedigree records no path between the pair. In that case any
-    degree of relatedness is a plausible missing link and counts as a refinement, with one
-    exception: two identical genomes are never a pedigree omission, they are one sample recorded
-    twice or a swap, so that stays a conflict. Measuring unrelated against an unspecified
-    expectation says nothing at all, which is the in-law case, so it is not flagged.
+    unspecified expectation means the pedigree records no path between the pair. Any relatedness
+    there is a plausible missing link, so it is a refinement -- except two identical genomes, which
+    indicate a duplicate or swap rather than an omission. Measuring unrelated against an
+    unspecified expectation says nothing, so it is not flagged.
     """
     acceptable = expected_degrees(relationship)
     if acceptable is None:
@@ -324,22 +297,16 @@ def relatedness_verdict(relationship: str, measured: str) -> str:
         return VERDICT_REFINEMENT
     if measured in acceptable:
         return VERDICT_OK
-    # A third-degree measurement against an expectation of unrelated is not assertable. Distant
-    # relatedness is indistinguishable from cohort background: on perth-neuro the cross-family
-    # background reached 0.158 and its p99.99 was 0.126, which is exactly where a real first
-    # cousin sits. The 40 pairs this catches were also concentrated on a handful of samples, one
-    # of them appearing in 8 different pairs, which is the signature of a sample-level artefact
-    # rather than kinship. So it is surfaced as a refinement rather than claimed as an error.
+    # Third-degree relatedness against an expectation of unrelated is not assertable: it overlaps
+    # the cohort background distribution, so surface it as a refinement rather than an error.
     if measured == DEGREE_THIRD and acceptable == frozenset({DEGREE_UNRELATED}):
         return VERDICT_REFINEMENT
     return VERDICT_CONFLICT
 
 
 def convert_to_web_url(dataset_name: str, html_path: Path | str) -> str:
-    """
-    Convert a gs:// web-bucket path to the http(s) web URL.
-    """
-    # Important - strip -test from dataset suffix before constructing the web URL
+    """Convert a gs:// web-bucket path to the http(s) web URL."""
+    # storage config is keyed on the main dataset, not the -test suffix
     dataset_name = dataset_name.removesuffix('-test')
     return str(html_path).replace(
         config_retrieve(['storage', dataset_name, 'web']),
@@ -358,13 +325,9 @@ def _query_project_sgs(project: str) -> list[dict]:
 def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> SomalierIndex:
     """
     Query metamist for all SGs in the project with their somalier fingerprint status.
-    Returns a SomalierIndex with O(1) lookup by participant or sg_id.
 
-    Builds fresh SgSomalierInfo instances each call (safe to mutate)
-    while the underlying metamist query is cached.
-
-    If filter_sgs is True, only include SGs that meet the sequencing type & technology requirements
-    as defined in the config.
+    The metamist query is cached, but fresh SgSomalierInfo instances are built each call.
+    With filter_sgs, only SGs matching the configured sequencing type and technology are included.
     """
     raw_sgs = _query_project_sgs(project)
 
@@ -394,10 +357,7 @@ def find_sgids_without_somalier(index: SomalierIndex) -> set[str]:
 
 
 def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
-    """
-    Select the best source file for somalier extraction from a list of analyses.
-    Default priority: CRAM > gVCF > VCF (configurable).
-    """
+    """Pick the highest-priority analysis output, CRAM before gVCF by default."""
     priority = config_retrieve(
         ['somalier_extract', 'priority'],
         ['cram', 'gvcf'],
@@ -427,10 +387,9 @@ def _select_best_file_for_sg(analyses: list[dict]) -> str | None:
 @cache
 def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> tuple[dict[str, str], dict[str, dict]]:
     """
-    For each SG ID, query metamist for available analyses and select the best
-    source file for somalier extraction.
+    Select the best somalier extraction source file for each SG ID.
 
-    Returns {sg_id: source_file_path} for SGs where a suitable file was found.
+    Returns ({sg_id: source_file_path}, {sg_id: external IDs}) for SGs with a suitable file.
     """
     resolved = get_metamist().get_metamist_proj(project)
     response = query(ANALYSIS_QUERY, variables={'project': resolved, 'sgIds': list(sgids)})
@@ -455,9 +414,9 @@ def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> tup
 @cache
 def get_project_pedigree(project: str) -> list[dict]:
     """
-    Query metamist for the full project pedigree.
-    Returns the raw pedigree list with family_id, individual_id, paternal_id,
-    maternal_id, sex, affected for every individual (including unsequenced).
+    Query metamist for the full project pedigree, including unsequenced individuals.
+
+    Each row has family_id, individual_id, paternal_id, maternal_id, sex and affected.
     """
     resolved = get_metamist().get_metamist_proj(project)
     response = query(PEDIGREE_QUERY, variables={'project': resolved})
@@ -469,27 +428,18 @@ def build_ped_content(
     index: SomalierIndex,
 ) -> str:
     """
-    Build a complete PED file string with SG IDs as individual identifiers.
+    Build tab-delimited 6-column PED content, using SG IDs as individual identifiers.
 
-    1. Query full pedigree from metamist (includes unsequenced parents)
-    2. For participants with SGs: substitute SG ID for individual_id (one row per SG)
-    3. Substitute paternal_id/maternal_id with SG IDs where possible, otherwise leave as participant ID
-
-    Args:
-        project: metamist project name
-        index: SomalierIndex with participant and SG data
-
-    Returns:
-        PED file content as a string (6-column format, tab-delimited)
+    Participants with SGs get one row per SG; unsequenced individuals keep their participant ID.
+    Paternal/maternal IDs are substituted with SG IDs where possible.
     """
     pedigree = get_project_pedigree(project)
 
-    # Build reverse mapping: participant_external_id -> [sg_id, ...]
     participant_to_sgs: dict[str, list[str]] = {}
     for info in index.by_sg.values():
         participant_to_sgs.setdefault(info.participant_external_id, []).append(info.sg_id)
 
-    # For ID substitution in paternal/maternal fields, pick first SG per participant
+    # parent columns hold a single ID, so pick one SG per participant
     participant_to_primary_sg: dict[str, str] = {}
     for participant_id, sg_ids in participant_to_sgs.items():
         participant_to_primary_sg[participant_id] = sorted(sg_ids)[0]

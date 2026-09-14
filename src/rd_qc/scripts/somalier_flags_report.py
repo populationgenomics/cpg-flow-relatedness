@@ -70,8 +70,7 @@ CATEGORY_ORDER = ['sex', 'self', 'pedigree']
 MIN_GROUPS_FOR_FILTER_BAR = 5
 
 # How many flag lines a family group shows inline before collapsing the rest behind its expand.
-# Real datasets have families with 50+ pedigree mismatches (perth-neuro family 8718 has 57), and
-# rendering those inline buries every other family under a wall of text.
+# A single family can carry 50+ pedigree mismatches, which inline would bury every other family.
 INLINE_FLAG_LIMIT = 5
 
 DATASET_SGS_QUERY = gql(
@@ -739,9 +738,9 @@ def split_by_impact(
     """
     Split the active groups into (conflicts, refinements).
 
-    Refinements are where the recorded pedigree is simply less specific than the genotypes, and
-    they outnumber conflicts roughly 92 to 71 on perth-neuro, so leaving them mixed in hides every
-    real finding. See utils.is_pedigree_refinement.
+    Refinements are where the recorded pedigree is simply less specific than the genotypes. They
+    typically outnumber conflicts, so mixing them in hides the real findings. The split is assigned
+    by utils.relatedness_verdict.
     """
     return (
         _rebuild_subset(groups, infos, lambda row: row.impact == 'conflict'),

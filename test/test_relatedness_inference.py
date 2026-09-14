@@ -1,10 +1,9 @@
 """
 Tests for inferring relatedness from what somalier measured, rather than from its --infer output.
 
-The band edges are calibrated against perth-neuro, where the pedigree already states the
-relationship for 99,999 pairs. The `OBSERVED_*` constants below are the real measured ranges from
-that dataset, so these tests double as a record of what the calibration was based on: if a band
-edge moves far enough to reclassify a real cluster, a test fails.
+The `OBSERVED_*` constants are measured kinship ranges from a calibration cohort of ~100k pairs
+whose relationships the pedigree already states. They pin the band edges to real data: if an edge
+moves far enough to reclassify a known cluster, a test fails.
 """
 
 import pytest
@@ -30,10 +29,10 @@ from rd_qc.utils import (
     relatedness_verdict,
 )
 
-# somalier compares ~16.5k sites; the real spread was 14197..17002, only 1.2x.
+# somalier compares ~16.5k sites, with little spread between pairs.
 SITES = 16500
 
-# The measured clusters on perth-neuro, as (kin_min, kin_max, ibs0_min, ibs0_max, n_pairs).
+# Measured clusters, as (kin_min, kin_max, ibs0_min, ibs0_max, n_pairs).
 OBSERVED_PARENT_CHILD = (0.438, 0.548, 0, 12, 215)
 OBSERVED_FULL_SIBLINGS = (0.430, 0.554, 256, 459, 26)
 OBSERVED_GRANDCHILD = (0.203, 0.306, 554, 830, 8)
@@ -70,7 +69,7 @@ def test_infer_degree(relatedness, ibs0, expected):
     ],
 )
 def test_observed_clusters_land_in_the_right_band_at_both_extremes(cluster, expected):
-    # Every real pair in these clusters must classify correctly, not just the median.
+    # Both extremes of each cluster must classify correctly, not just the median.
     kin_min, kin_max, ibs0_min, ibs0_max, _ = cluster
 
     assert infer_degree(kin_min, ibs0_max, SITES) == expected
@@ -79,7 +78,6 @@ def test_observed_clusters_land_in_the_right_band_at_both_extremes(cluster, expe
 
 def test_ibs0_separates_the_two_first_degree_relationships():
     # A parent and child share an allele at every site, so ibs0 is ~0. Full siblings do not.
-    # On perth-neuro parent-child reached ibs0 12 and siblings never went below 201.
     assert infer_degree(0.5, 12, SITES) == DEGREE_PARENT_CHILD
     assert infer_degree(0.5, 201, SITES) == DEGREE_SIBLINGS
 
@@ -126,7 +124,7 @@ def test_expected_degrees(relationship, acceptable):
 
 def test_siblings_accepts_either_half_or_full():
     # peddy says 'siblings' when only one shared parent is recorded, which is satisfied by a half
-    # sibling at ~0.25 or a full sibling at ~0.5. This is what kills the biggest false-flag class.
+    # sibling at ~0.25 or a full sibling at ~0.5.
     assert expected_degrees('siblings') == {DEGREE_SIBLINGS, DEGREE_SECOND}
     assert relatedness_verdict('siblings', DEGREE_SIBLINGS) == VERDICT_OK
     assert relatedness_verdict('siblings', DEGREE_SECOND) == VERDICT_OK
@@ -170,7 +168,7 @@ def test_relatedness_verdict(relationship, measured, verdict):
 
 def test_identical_genomes_are_always_a_conflict():
     # Two samples with one genome is never a pedigree omission: it is one sample recorded twice, or
-    # a swap. perth-neuro has exactly one, and the old label-based check missed it entirely.
+    # a swap.
     for relationship in (UNSPECIFIED_RELATED, 'unknown', 'unrelated', 'parent-child', 'siblings'):
         assert relatedness_verdict(relationship, DEGREE_IDENTICAL) == VERDICT_CONFLICT
 
@@ -183,8 +181,8 @@ def test_in_laws_are_not_flagged():
 
 
 def test_the_consanguinity_case_survives():
-    # perth-neuro's one real finding: a recorded mother and father measuring second-degree. peddy
-    # reports co-parents as 'mom-dad' rather than 'unrelated', so the reframing never touches them.
+    # A recorded mother and father measuring second-degree must stay a conflict. peddy reports
+    # co-parents as 'mom-dad' rather than 'unrelated', so the reframing never touches them.
     assert refine_expected_relationship('mom-dad', 'FAM1', 'FAM1') == 'mom-dad'
     assert infer_degree(0.181, 871, SITES) == DEGREE_SECOND
     assert relatedness_verdict('mom-dad', DEGREE_SECOND) == VERDICT_CONFLICT
@@ -219,8 +217,8 @@ def test_every_other_relationship_passes_through_untouched(relationship):
 # ---------------------------------------------------------------------------
 # Calibration against the measured background
 # ---------------------------------------------------------------------------
-# Cross-family pairs on perth-neuro, which the pedigree really does expect to be unrelated, over
-# 99,515 pairs. No upper cluster, just a smooth tail, so anything inside it is background.
+# Cross-family pairs, which the pedigree really does expect to be unrelated. These form no upper
+# cluster, just a smooth tail, so anything inside the tail is cohort background.
 OBSERVED_CROSS_FAMILY_MEDIAN = -0.006
 OBSERVED_CROSS_FAMILY_P99_9 = 0.072
 OBSERVED_CROSS_FAMILY_MAX = 0.158
@@ -233,8 +231,8 @@ def test_the_second_degree_bound_sits_in_the_gap_above_background():
 
 
 def test_the_measured_background_never_reaches_second_degree():
-    # Every one of those 99,515 pairs must read as third-degree or unrelated, never closer,
-    # otherwise the report claims a pedigree error where there is only cohort background.
+    # The whole background tail must read as third-degree or unrelated, never closer, otherwise
+    # the report claims a pedigree error where there is only cohort background.
     for kin in (OBSERVED_CROSS_FAMILY_MEDIAN, OBSERVED_CROSS_FAMILY_P99_9, OBSERVED_CROSS_FAMILY_MAX):
         assert infer_degree(kin, 1400, SITES) in (DEGREE_UNRELATED, DEGREE_THIRD)
 
@@ -248,8 +246,8 @@ def test_bounds_are_the_geometric_midpoints_between_degrees():
 
 
 def test_distant_relatedness_against_an_unrelated_expectation_is_only_a_refinement():
-    # Not assertable: a real first cousin sits at 0.125, and this cohort's background p99.99 was
-    # 0.126. The 40 pairs it caught were concentrated on a few samples, one in 8 pairs each.
+    # Not assertable: a real first cousin sits at 0.125, which is inside the background tail, so
+    # third-degree and true background are indistinguishable.
     assert relatedness_verdict('unrelated', DEGREE_THIRD) == VERDICT_REFINEMENT
     assert relatedness_verdict('mom-dad', DEGREE_THIRD) == VERDICT_REFINEMENT
 
