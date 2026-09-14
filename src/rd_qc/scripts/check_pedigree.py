@@ -20,23 +20,23 @@ from loguru import logger
 from peddy import Ped, Sample
 
 from rd_qc.utils import (
+    DEGREE_IDENTICAL,
+    VERDICT_OK,
+    VERDICT_REFINEMENT,
     SomalierFlag,
     SomalierRelatednessFlag,
     SomalierSexInferenceFlag,
-    is_pedigree_refinement,
+    infer_degree,
     refine_expected_relationship,
+    relatedness_verdict,
 )
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
 from cpg_utils.metamist_registration import create_new
 
-# Below this, an inferred relationship between a pair the pedigree calls unrelated is too weak to
-# be worth reporting as a finding.
-UNRELATED_TO_RELATED_MIN_RELATEDNESS = 0.1
-
-# Reporting buckets, most serious first.
-MISMATCH_BUCKETS = ('related_to_unrelated', 'unrelated_to_related', 'refinement')
+# Slack reporting buckets, most serious first.
+MISMATCH_BUCKETS = ('identical', 'lost_relationship', 'extra_relationship', 'refinement')
 
 
 _messages: list[str] = []
@@ -137,68 +137,61 @@ def _check_sex(samples_df: pd.DataFrame) -> dict[str, SomalierSexInferenceFlag]:
     return sex_mismatches_by_sgid
 
 
-def _mismatch_bucket(expected_rel: str, inferred_rel: str, relatedness: float) -> str:
-    """
-    Which reporting bucket a pedigree mismatch belongs in.
-
-    Refinements are classified first, because a refinement is neither of the other two. This used
-    to test `expected_rel == 'unknown'`, which peddy never returns for an unspecified relationship
-    (it returns 'related at unknown level'), so every refinement fell through to
-    related_to_unrelated and was reported as the most serious kind of finding. On perth-neuro that
-    miscategorised 92 of 163 flags.
-    """
-    if is_pedigree_refinement(expected_rel, inferred_rel):
+def _mismatch_bucket(expected_rel: str, measured_rel: str, verdict: str) -> str:
+    """Which Slack reporting bucket a flagged pair belongs in, most serious first."""
+    if measured_rel == DEGREE_IDENTICAL:
+        return 'identical'
+    if verdict == VERDICT_REFINEMENT:
         return 'refinement'
-    if expected_rel in ('unknown', 'unrelated') and inferred_rel != 'unrelated':
-        if relatedness > UNRELATED_TO_RELATED_MIN_RELATEDNESS:
-            return 'unrelated_to_related'
-        return 'ignored'
-    return 'related_to_unrelated'
+    # A conflict is 'lost' when the pedigree expected a closer relationship than was measured,
+    # which is the sample-swap shape, and 'extra' when the measurement is closer than expected.
+    expected_closer = expected_rel not in ('unrelated', 'mom-dad')
+    return 'lost_relationship' if expected_closer else 'extra_relationship'
 
 
-def _report_relatedness_findings(
-    unrelated_to_related: list[str],
-    related_to_unrelated: list[str],
-    refinements: list[str],
-) -> None:
-    if related_to_unrelated:
-        info(
-            f'❗ Found {len(related_to_unrelated)} sample pair(s) '
-            f'that are provided as related, but inferred as unrelated:',
-        )
-        for i, pair in enumerate(related_to_unrelated):
+BUCKET_HEADINGS = {
+    'identical': '❗❗ {n} sample pair(s) whose genomes are identical but which are recorded as different individuals:',
+    'lost_relationship': '❗ {n} sample pair(s) that are recorded as related, but measured as less related:',
+    'extra_relationship': '⚠️ {n} sample pair(s) that are recorded as unrelated, but measured as related:',
+}
+
+
+def _report_relatedness_findings(buckets: dict[str, list[str]]) -> None:
+    for key, heading in BUCKET_HEADINGS.items():
+        pairs = buckets.get(key) or []
+        if not pairs:
+            continue
+        info(heading.format(n=len(pairs)))
+        for i, pair in enumerate(pairs):
             info(f' {i + 1}. {pair}')
-    if unrelated_to_related:
-        info(
-            f'⚠️ Found {len(unrelated_to_related)} '
-            f'sample pair(s) that are provided as unrelated, are inferred as '
-            f'related:',
-        )
-        for i, pair in enumerate(unrelated_to_related):
-            info(f' {i + 1}. {pair}')
-    if refinements:
+    if buckets.get('refinement'):
         # Counted but not listed: these are routinely the bulk of the flags and listing them
-        # drowns the two buckets above, which are the ones that need a decision.
+        # drowns the buckets above, which are the ones that need a decision.
         info(
-            f'ℹ️ {len(refinements)} pair(s) where the inferred relationship is more specific than '  # noqa: RUF001
-            f'the recorded pedigree (usually only one parent on file). See the flags report.',
+            f'ℹ️ {len(buckets["refinement"])} pair(s) measured as related where the pedigree records '  # noqa: RUF001
+            f'no relationship between them (usually only one parent on file). See the flags report.',
         )
-    if not unrelated_to_related and not related_to_unrelated:
-        info('✅ Inferred pedigree matches for all provided related pairs.')
+    if not any(buckets.get(key) for key in BUCKET_HEADINGS):
+        info('✅ Measured relatedness matches the pedigree for every pair.')
     info('')
 
 
 def _check_relatedness(
     pairs_df,
     expected_ped: Ped,
-    inferred_ped: Ped,
     bad_ids: list,
 ) -> dict[str, list[SomalierRelatednessFlag]]:
+    """
+    Compare what the pedigree expects against what somalier measured, pair by pair.
+
+    peddy is used only on our own expected pedigree, which is trustworthy. The relationship the
+    data supports comes from the kinship coefficient and ibs0 via `infer_degree`, not from
+    somalier's `--infer` reconstruction. See the note above infer_degree for why.
+    """
     info('*Relatedness:*')
     expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
-    inferred_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in inferred_ped.samples()}
 
-    buckets: dict[str, list[str]] = {key: [] for key in (*MISMATCH_BUCKETS, 'ignored')}
+    buckets: dict[str, list[str]] = {key: [] for key in MISMATCH_BUCKETS}
 
     relatedness_flags_by_sg_id: dict[str, list[SomalierRelatednessFlag]] = {}
     for idx, row in pairs_df.iterrows():
@@ -209,63 +202,54 @@ def _check_relatedness(
 
         expected_ped_s1 = expected_ped_sample_by_id.get(s1, {})
         expected_ped_s2 = expected_ped_sample_by_id.get(s2, {})
-        inferred_ped_s1 = inferred_ped_sample_by_id.get(s1, {})
-        inferred_ped_s2 = inferred_ped_sample_by_id.get(s2, {})
         with contextlib.redirect_stderr(None), contextlib.redirect_stdout(None):
-            if inferred_ped_s1 and inferred_ped_s2:
-                inferred_rel = inferred_ped.relation(inferred_ped_s1, inferred_ped_s2)
-            else:
-                inferred_rel = 'unknown'
             if expected_ped_s1 and expected_ped_s2:
-                # Needs inferred_rel, so it must be computed first.
                 expected_rel = refine_expected_relationship(
                     expected_ped.relation(expected_ped_s1, expected_ped_s2),
-                    inferred_rel,
                     expected_ped_s1.family_id,
                     expected_ped_s2.family_id,
                 )
             else:
                 expected_rel = 'unknown'
 
-        if inferred_rel != expected_rel:
-            # Make sure that the s1 / s2 sample IDs are sorted to ensure consistent keying
-            if s1 > s2:
-                s1, s2 = s2, s1
-                expected_ped_s1, expected_ped_s2 = expected_ped_s2, expected_ped_s1
-
-            line = _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, inferred_rel, row)
-            # peddy .samples() yields Sample objects (attribute access), but the
-            # dict lookup above falls back to {} when a sample is missing, so guard
-            # both cases with getattr.
-            family_external_id = (
-                getattr(expected_ped_s1, 'family_id', None) or getattr(expected_ped_s2, 'family_id', None) or 'unknown'
-            )
-            if s1 not in relatedness_flags_by_sg_id:
-                relatedness_flags_by_sg_id[s1] = []
-            relatedness_flags_by_sg_id[s1].append(
-                SomalierRelatednessFlag(
-                    category='relatedness_mismatch',
-                    sg_id_1=s1,
-                    sg_id_2=s2,
-                    family_external_id=family_external_id,
-                    expected_relationship=expected_rel,
-                    inferred_relationship=inferred_rel,
-                    relatedness=row['relatedness'],
-                    ibs0=row['ibs0'],
-                    ibs2=row['ibs2'],
-                ),
-            )
-
-            buckets[_mismatch_bucket(expected_rel, inferred_rel, row['relatedness'])].append(line)
+        measured_rel = infer_degree(row['relatedness'], row['ibs0'], row['n'])
+        verdict = relatedness_verdict(expected_rel, measured_rel)
 
         pairs_df.loc[idx, 'provided_rel'] = expected_rel
-        pairs_df.loc[idx, 'inferred_rel'] = inferred_rel
+        pairs_df.loc[idx, 'inferred_rel'] = measured_rel
 
-    _report_relatedness_findings(
-        buckets['unrelated_to_related'],
-        buckets['related_to_unrelated'],
-        buckets['refinement'],
-    )
+        if verdict == VERDICT_OK:
+            continue
+
+        # Make sure that the s1 / s2 sample IDs are sorted to ensure consistent keying
+        if s1 > s2:
+            s1, s2 = s2, s1
+            expected_ped_s1, expected_ped_s2 = expected_ped_s2, expected_ped_s1
+
+        line = _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel, measured_rel, row)
+        # peddy .samples() yields Sample objects (attribute access), but the dict lookup above
+        # falls back to {} when a sample is missing, so guard both cases with getattr.
+        family_external_id = (
+            getattr(expected_ped_s1, 'family_id', None) or getattr(expected_ped_s2, 'family_id', None) or 'unknown'
+        )
+        relatedness_flags_by_sg_id.setdefault(s1, []).append(
+            SomalierRelatednessFlag(
+                category='relatedness_mismatch',
+                sg_id_1=s1,
+                sg_id_2=s2,
+                family_external_id=family_external_id,
+                expected_relationship=expected_rel,
+                inferred_relationship=measured_rel,
+                relatedness=row['relatedness'],
+                ibs0=row['ibs0'],
+                ibs2=row['ibs2'],
+                verdict=verdict,
+            ),
+        )
+
+        buckets[_mismatch_bucket(expected_rel, measured_rel, verdict)].append(line)
+
+    _report_relatedness_findings(buckets)
 
     return relatedness_flags_by_sg_id
 
@@ -288,8 +272,6 @@ def produce_flags(
     logger.info(somalier_samples)
     samples_df = pd.read_csv(somalier_samples, delimiter='\t')
     pairs_df = pd.read_csv(somalier_pairs, delimiter='\t')
-    with to_path(somalier_samples).open() as f:
-        inferred_ped = Ped(f)
     with to_path(expected_ped_path).open() as f:
         expected_ped = Ped(f)
 
@@ -307,7 +289,6 @@ def produce_flags(
     relatedness_flags_by_sg_id = _check_relatedness(
         pairs_df,
         expected_ped,
-        inferred_ped,
         bad_ids,
     )
 

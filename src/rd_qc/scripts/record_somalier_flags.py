@@ -263,6 +263,8 @@ def reconcile_sg_somalier_relatedness_flags(
             flag['relatedness'] = new_flag['relatedness']
             flag['ibs0'] = new_flag['ibs0']
             flag['ibs2'] = new_flag['ibs2']
+            # Derived from the measured values, so it refreshes with them.
+            flag['verdict'] = new_flag.get('verdict', '')
             logger.info(f"{sg_id} :: {report} flag '{flag['category']}' remains unresolved (value refreshed).")
             stats['retained'] += 1
         else:

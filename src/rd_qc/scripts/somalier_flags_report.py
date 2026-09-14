@@ -21,11 +21,11 @@ import jinja2
 from loguru import logger
 
 from rd_qc.utils import (
+    VERDICT_REFINEMENT,
     SomalierFlag,
     SomalierRelatednessFlag,
     SomalierSelfRelatednessFlag,
     SomalierSexInferenceFlag,
-    is_pedigree_refinement,
     sg_ids_tag,
 )
 
@@ -560,9 +560,11 @@ def _pedigree_row_parts(flag: SomalierRelatednessFlag, infos: dict[str, SGInfo])
         'subject_detail': PAIR_SEP.join(participants) if len(participants) == len(members) else '',
         'members': members,
         'expected': flag.expected_relationship or DASH,
-        'inferred': flag.inferred_relationship or DASH,
-        'result': f'expected {flag.expected_relationship} / inferred {flag.inferred_relationship}',
-        # Expected and inferred are rendered in their own column, and the family is the group
+        # The measured degree, so the report says what the data supports rather than what a
+        # pedigree reconstruction guessed.
+        'inferred': f'{flag.inferred_relationship or DASH} (measured)',
+        'result': f'expected {flag.expected_relationship} / measured {flag.inferred_relationship}',
+        # Expected and measured are rendered in their own column, and the family is the group
         # heading, so neither is repeated here.
         'details': (
             ('Relatedness', _fmt_num(flag.relatedness)),
@@ -599,12 +601,11 @@ def _flag_to_row(
     resolution_short, resolution_full = _date_parts(flag.resolution_date)
     sg_key = flag_sg_key(flag, owning_sg_id)
 
-    # Only pedigree flags can be refinements. A sex mismatch or a failed self-relatedness check is
-    # always a genuine disagreement.
-    refinement = category_key == 'pedigree' and is_pedigree_refinement(
-        flag.expected_relationship,
-        flag.inferred_relationship,
-    )
+    # Only pedigree flags can be refinements, and they carry their own verdict from the check. A
+    # sex mismatch or a failed self-relatedness check is always a genuine disagreement. Flags
+    # recorded before `verdict` existed have an empty string, and fall back to conflict so nothing
+    # old is silently de-emphasised.
+    refinement = category_key == 'pedigree' and flag.verdict == VERDICT_REFINEMENT
 
     return FlagRow(
         category=flag.category or '',
@@ -768,10 +769,7 @@ def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: 
     active_by_category = {key: sum(1 for f in active if CATEGORY_KEYS.get(f.category) == key) for key in CATEGORY_ORDER}
 
     refinements = sum(
-        1
-        for f in active
-        if CATEGORY_KEYS.get(f.category) == 'pedigree'
-        and is_pedigree_refinement(f.expected_relationship, f.inferred_relationship)
+        1 for f in active if CATEGORY_KEYS.get(f.category) == 'pedigree' and f.verdict == VERDICT_REFINEMENT
     )
 
     return {

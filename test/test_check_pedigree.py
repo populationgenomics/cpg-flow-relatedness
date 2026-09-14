@@ -52,12 +52,20 @@ def sample_row(
     return '\t'.join(str(values[column]) for column in SAMPLE_COLUMNS)
 
 
-def pair_row(sample_a: str, sample_b: str, relatedness: float) -> str:
-    """One somalier pairs.tsv row."""
+# somalier compares ~16.5k sites, and ibs0 is judged as a fraction of that, so tests must use a
+# realistic count for the parent-child / siblings split to behave as it does in production.
+SITES = 16500
+IBS0_PARENT_CHILD = 0
+IBS0_SIBLINGS = 340
+IBS0_UNRELATED = 1414
+
+
+def pair_row(sample_a: str, sample_b: str, relatedness: float, ibs0: int = IBS0_UNRELATED) -> str:
+    """One somalier pairs.tsv row. relatedness and ibs0 are what the check now infers from."""
     values = {
-        '#sample_a': sample_a, 'sample_b': sample_b, 'relatedness': relatedness, 'ibs0': 100,
+        '#sample_a': sample_a, 'sample_b': sample_b, 'relatedness': relatedness, 'ibs0': ibs0,
         'ibs2': 2000, 'hom_concordance': 0.9, 'hets_a': 50, 'hets_b': 50, 'hets_ab': 60,
-        'shared_hets': 40, 'hom_alts_a': 40, 'hom_alts_b': 40, 'shared_hom_alts': 30, 'n': 500,
+        'shared_hets': 40, 'hom_alts_a': 40, 'hom_alts_b': 40, 'shared_hom_alts': 30, 'n': SITES,
         'x_ibs0': 1, 'x_ibs2': 10, 'expected_relatedness': -1,
     }  # fmt: skip
     return '\t'.join(str(values[column]) for column in PAIR_COLUMNS)
@@ -77,8 +85,9 @@ def write_inputs(tmp_path: Path, sample_rows: list[str], pair_rows: list[str], p
     }
 
 
-# A trio where the expected PED says CPG003 is the child of CPG001 and CPG002, but somalier
-# inferred no parentage at all, so every pair's relationship disagrees.
+# A trio where the expected PED says CPG003 is the child of CPG001 and CPG002, but the measured
+# relatedness says all three are unrelated. The two parent-child pairs therefore conflict. The
+# CPG001/CPG002 pair does not: peddy calls co-parents 'mom-dad', which expects unrelated anyway.
 BROKEN_TRIO_PED = 'FAM1\tCPG001\t0\t0\t1\t1\nFAM1\tCPG002\t0\t0\t2\t1\nFAM1\tCPG003\tCPG001\tCPG002\t1\t1\n'
 
 
@@ -100,18 +109,19 @@ def broken_trio(tmp_path: Path, provided_sex_003: str = 'male') -> dict[str, str
 
 
 def test_matching_pedigree_and_sex_produces_no_flags(tmp_path):
-    # The inferred samples.tsv parentage matches the expected PED exactly, and every sex agrees.
+    # The measurements confirm the PED: both parent-child pairs at ~0.5 with ibs0 ~0, the two
+    # co-parents unrelated, and every sex agreeing.
     inputs = write_inputs(
         tmp_path,
         sample_rows=[
             sample_row('CPG001', inferred_sex=MALE, provided_sex='male'),
             sample_row('CPG002', inferred_sex=FEMALE, provided_sex='female'),
-            sample_row('CPG003', inferred_sex=MALE, provided_sex='male', paternal='CPG001', maternal='CPG002'),
+            sample_row('CPG003', inferred_sex=MALE, provided_sex='male'),
         ],
         pair_rows=[
             pair_row('CPG001', 'CPG002', relatedness=0.01),
-            pair_row('CPG001', 'CPG003', relatedness=0.49),
-            pair_row('CPG002', 'CPG003', relatedness=0.51),
+            pair_row('CPG001', 'CPG003', relatedness=0.49, ibs0=IBS0_PARENT_CHILD),
+            pair_row('CPG002', 'CPG003', relatedness=0.51, ibs0=IBS0_PARENT_CHILD),
         ],
         ped=BROKEN_TRIO_PED,
     )
@@ -142,9 +152,12 @@ def test_pedigree_mismatch_is_flagged_for_the_disagreeing_pairs(tmp_path):
     pedigree = [f for fs in flags.values() for f in fs if f.category == 'relatedness_mismatch']
     pairs = {(f.sg_id_1, f.sg_id_2) for f in pedigree}
 
-    # Expected says mom-dad and parent-child; inferred says none of it.
-    assert pairs == {('CPG001', 'CPG002'), ('CPG001', 'CPG003'), ('CPG002', 'CPG003')}
-    assert all(f.expected_relationship != f.inferred_relationship for f in pedigree)
+    # Both parent-child pairs conflict. CPG001/CPG002 are the co-parents, whom peddy calls
+    # 'mom-dad' and which expects unrelated, so the measurement agrees and raises nothing.
+    assert pairs == {('CPG001', 'CPG003'), ('CPG002', 'CPG003')}
+    assert all(f.expected_relationship == 'parent-child' for f in pedigree)
+    assert all(f.inferred_relationship == 'unrelated' for f in pedigree)
+    assert all(f.verdict == 'conflict' for f in pedigree)
     assert all(f.family_external_id == 'FAM1' for f in pedigree)
 
 
@@ -160,7 +173,6 @@ def test_pairwise_flags_are_recorded_against_the_first_sg_of_the_pair_only(tmp_p
 
     # This is the convention the report's dedup relies on: the lexicographically first SG owns it.
     assert owners == {
-        ('CPG001', 'CPG002'): 'CPG001',
         ('CPG001', 'CPG003'): 'CPG001',
         ('CPG002', 'CPG003'): 'CPG002',
     }
@@ -268,5 +280,5 @@ def test_cross_family_pairs_keep_expected_unrelated(tmp_path):
     pedigree = [f for fs in flags.values() for f in fs if f.category == 'relatedness_mismatch']
 
     assert [(f.expected_relationship, f.inferred_relationship) for f in pedigree] == [
-        ('unrelated', 'full siblings')
+        ('unrelated', 'siblings')
     ]

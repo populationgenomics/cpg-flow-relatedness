@@ -280,7 +280,7 @@ def test_render_leaves_no_unresolved_template_syntax():
         '(no family)',
         'PID_G',
         'cross-family',
-        'expected parent-child / inferred unrelated',
+        'expected parent-child / measured unrelated',
         'provided unknown / inferred male',
         'relatedness 0.62 (expected ~1.0, threshold 0.9)',
         'Resolved &mdash; past incidents',

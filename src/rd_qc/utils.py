@@ -162,10 +162,15 @@ class SomalierRelatednessFlag(SomalierFlag):
     sg_id_2: str
     family_external_id: str
     expected_relationship: str
+    # The degree the measurement supports, from infer_degree. Not somalier's --infer output.
     inferred_relationship: str
     relatedness: float
     ibs0: int
     ibs2: int
+    # 'conflict' or 'refinement', from relatedness_verdict. Stored rather than re-derived so the
+    # report does not need the pedigree to classify a flag. Empty on flags recorded before this
+    # field existed; readers fall back to treating those as conflicts.
+    verdict: str = ''
 
 
 # peddy's Ped.relation() vocabulary. Pinned here because the pedigree check classifies flags by
@@ -191,64 +196,143 @@ PEDDY_RELATIONSHIPS = frozenset(
 UNSPECIFIED_RELATED = 'related at unknown level'
 
 
-def refine_expected_relationship(
-    relation: str,
-    inferred: str,
-    family_1: str | None,
-    family_2: str | None,
-) -> str:
+def refine_expected_relationship(relation: str, family_1: str | None, family_2: str | None) -> str:
     """
     Reinterpret peddy's 'unrelated' for two individuals recorded in the same family.
 
     peddy returns 'unrelated' whenever it finds no blood path between a pair, which includes two
     members of one family whose connecting links simply are not recorded. Reporting that as
-    "expected unrelated" is wrong, and it generated a false alarm for every such pair: all 66 of
-    perth-neuro's 'expected unrelated' flags were same-family, and not one was cross-family. If
-    the pedigree puts two people in a family, the honest expectation is that they are related at
-    some unspecified level.
+    "expected unrelated" is wrong: all 66 of perth-neuro's 'expected unrelated' flags were
+    same-family and not one was cross-family. If the pedigree puts two people in a family, the
+    honest expectation is that they are related at some unspecified level.
 
-    Note the `inferred` argument. The reframing applies only when the genotypes actually found a
-    relationship, so that it can never turn a matching pair into a mismatch. Two family members
-    with no recorded link whom somalier also calls unrelated agree, and must keep agreeing. Without
-    this guard the reframing invented 18 new conflicts on perth-neuro out of pairs that previously
-    matched, which is the in-law case below arriving as an alarm.
+    This only changes what the expectation is *called*. Whether that expectation is met is decided
+    by `relatedness_verdict`, which treats an unspecified expectation as satisfied by anything
+    short of two identical samples. So a pair of in-laws whom the genotypes also call unrelated
+    stays unflagged.
 
     Co-parents are unaffected, because peddy reports a recorded mother and father as 'mom-dad'
-    rather than 'unrelated'. So a mother and father who turn out to be blood relatives still
-    surfaces as a conflict rather than being quietly demoted.
-
-    The known simplification: individuals related only by marriage, an aunt's husband say, really
-    are expected to be unrelated, but nothing in the pedigree distinguishes them from a missing
-    link. They are left unflagged, exactly as they were before.
+    rather than 'unrelated'. A mother and father who turn out to be blood relatives therefore
+    still surfaces as a conflict rather than being quietly demoted.
     """
-    if relation == 'unrelated' and inferred != 'unrelated' and family_1 and family_1 == family_2:
+    if relation == 'unrelated' and family_1 and family_1 == family_2:
         return UNSPECIFIED_RELATED
     return relation
 
 
-def is_pedigree_refinement(expected: str, inferred: str) -> bool:
+# ---------------------------------------------------------------------------
+# Relatedness degrees, inferred from what somalier measured
+# ---------------------------------------------------------------------------
+# We derive the relationship ourselves from the kinship coefficient rather than reading somalier's
+# `--infer` reconstruction. somalier documents --infer as being for high quality sample pairs where
+# both parents are present, and CPG pedigrees frequently record only one parent, so it runs well
+# outside its envelope: on perth-neuro it renumbered the family id of 477 of 623 samples, invented
+# 114 parent links, and created 42 synthetic placeholder parents. peddy then faithfully read that
+# fabricated pedigree, which produced ~160 false flags while missing a genotypically identical pair.
+DEGREE_IDENTICAL = 'identical'
+DEGREE_PARENT_CHILD = 'parent-child'
+DEGREE_SIBLINGS = 'siblings'
+DEGREE_SECOND = 'second-degree'
+DEGREE_THIRD = 'third-degree'
+DEGREE_UNRELATED = 'unrelated'
+
+# Kinship coefficient lower bounds. somalier reports relatedness on the 2*phi scale, where each
+# successive degree halves: identical 1.0, first-degree 0.5, second 0.25, third 0.125. The bounds
+# are the geometric midpoints between those expectations, which is both the principled split and
+# what perth-neuro's measured clusters support: parent-child 0.438..0.548 (n=215), full siblings
+# 0.430..0.554 (n=26), grandchild 0.203..0.306 (n=8), niece/nephew 0.204..0.296 (n=8).
+#
+# The second-degree bound matters most. Cross-family pairs, which the pedigree really does expect
+# to be unrelated, form a smooth background distribution with no upper cluster: median -0.006,
+# p99.9 0.072, max 0.158 over 99,515 pairs. So 0.177 sits in the genuine gap between that
+# background and the real second-degree cluster at 0.203+.
+IDENTICAL_MIN_RELATEDNESS = 0.90
+FIRST_DEGREE_MIN_RELATEDNESS = 0.354
+SECOND_DEGREE_MIN_RELATEDNESS = 0.177
+THIRD_DEGREE_MIN_RELATEDNESS = 0.088
+
+# ibs0 splits the two first-degree relationships: a parent and child share an allele at every site,
+# so ibs0 is ~0, while full siblings inherit different alleles at some. Expressed as a fraction of
+# the sites compared so the threshold survives a different sites VCF. On perth-neuro parent-child
+# reached at most 0.0007 (ibs0 <= 12) and siblings never went below 0.012 (ibs0 >= 201), a clean
+# separation with no overlap, so this sits between them with margin on both sides.
+PARENT_CHILD_MAX_IBS0_RATIO = 0.005
+
+
+def infer_degree(relatedness: float, ibs0: int, sites: int) -> str:
     """
-    True when the inferred relationship fills a blank in the recorded pedigree rather than
-    contradicting it.
+    The relatedness degree the measurement supports, independent of any pedigree.
 
-    These are pedigree *incompleteness*, not pedigree errors, and they dominate real datasets:
-    92 of perth-neuro's 163 pedigree flags are refinements. Two patterns qualify.
-
-    The pedigree places the pair in a family but records no path between them, and the genotypes
-    name a specific relationship.
-
-    Or the pedigree says 'siblings' and the genotypes say 'full siblings'. peddy reports
-    'siblings' when only one shared parent is recorded, so this is what you get whenever only the
-    mother is in the database: the pair really are full siblings, but the expected pedigree cannot
-    know that while the paternal column is empty. This is the single most common flag in practice
-    and carries no signal.
-
-    The reverse direction stays a conflict. If the pedigree made a specific claim and the genotypes
-    could not confirm it, someone should look.
+    `sites` is somalier's `n`, the number of sites the pair was compared at.
     """
-    if expected == UNSPECIFIED_RELATED:
-        return inferred != 'unrelated'
-    return expected == 'siblings' and inferred == 'full siblings'
+    if relatedness >= IDENTICAL_MIN_RELATEDNESS:
+        return DEGREE_IDENTICAL
+    if relatedness >= FIRST_DEGREE_MIN_RELATEDNESS:
+        ratio = (ibs0 / sites) if sites else 0.0
+        return DEGREE_PARENT_CHILD if ratio <= PARENT_CHILD_MAX_IBS0_RATIO else DEGREE_SIBLINGS
+    if relatedness >= SECOND_DEGREE_MIN_RELATEDNESS:
+        return DEGREE_SECOND
+    if relatedness >= THIRD_DEGREE_MIN_RELATEDNESS:
+        return DEGREE_THIRD
+    return DEGREE_UNRELATED
+
+
+# Which measured degrees are consistent with each relationship a pedigree can state. peddy's
+# 'siblings' means "shares at least one recorded parent", so it spans full and half siblings and
+# accepts either a first- or second-degree measurement.
+EXPECTED_DEGREES: dict[str, frozenset[str]] = {
+    'parent-child': frozenset({DEGREE_PARENT_CHILD}),
+    'full siblings': frozenset({DEGREE_SIBLINGS}),
+    'siblings': frozenset({DEGREE_SIBLINGS, DEGREE_SECOND}),
+    'grandchild': frozenset({DEGREE_SECOND}),
+    'niece/nephew': frozenset({DEGREE_SECOND}),
+    'cousins': frozenset({DEGREE_THIRD}),
+    'mom-dad': frozenset({DEGREE_UNRELATED}),
+    'unrelated': frozenset({DEGREE_UNRELATED}),
+}
+
+VERDICT_OK = 'ok'
+VERDICT_CONFLICT = 'conflict'
+VERDICT_REFINEMENT = 'refinement'
+
+
+def expected_degrees(relationship: str) -> frozenset[str] | None:
+    """
+    The measured degrees consistent with the stated relationship, or None when the pedigree states
+    nothing usable ('related at unknown level', or a sample missing from the pedigree entirely).
+    """
+    return EXPECTED_DEGREES.get(relationship)
+
+
+def relatedness_verdict(relationship: str, measured: str) -> str:
+    """
+    Whether a measured degree agrees with the pedigree, contradicts it, or fills a gap in it.
+
+    `relationship` is the expected relationship after `refine_expected_relationship`, so an
+    unspecified expectation means the pedigree records no path between the pair. In that case any
+    degree of relatedness is a plausible missing link and counts as a refinement, with one
+    exception: two identical genomes are never a pedigree omission, they are one sample recorded
+    twice or a swap, so that stays a conflict. Measuring unrelated against an unspecified
+    expectation says nothing at all, which is the in-law case, so it is not flagged.
+    """
+    acceptable = expected_degrees(relationship)
+    if acceptable is None:
+        if measured == DEGREE_IDENTICAL:
+            return VERDICT_CONFLICT
+        if measured == DEGREE_UNRELATED:
+            return VERDICT_OK
+        return VERDICT_REFINEMENT
+    if measured in acceptable:
+        return VERDICT_OK
+    # A third-degree measurement against an expectation of unrelated is not assertable. Distant
+    # relatedness is indistinguishable from cohort background: on perth-neuro the cross-family
+    # background reached 0.158 and its p99.99 was 0.126, which is exactly where a real first
+    # cousin sits. The 40 pairs this catches were also concentrated on a handful of samples, one
+    # of them appearing in 8 different pairs, which is the signature of a sample-level artefact
+    # rather than kinship. So it is surfaced as a refinement rather than claimed as an error.
+    if measured == DEGREE_THIRD and acceptable == frozenset({DEGREE_UNRELATED}):
+        return VERDICT_REFINEMENT
+    return VERDICT_CONFLICT
 
 
 def convert_to_web_url(dataset_name: str, html_path: Path | str) -> str:

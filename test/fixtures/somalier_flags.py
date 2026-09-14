@@ -19,6 +19,7 @@ Nothing here touches Metamist. `MOCK_SEQUENCING_GROUPS` mirrors DATASET_SGS_QUER
 """
 
 from rd_qc.scripts.somalier_flags_report import SGInfo
+from rd_qc.utils import UNSPECIFIED_RELATED, relatedness_verdict
 
 AR_GUID = 'mock-ar-guid-0001'
 FIRST_SEEN = '2026-06-01T09:15:00+00:00'
@@ -78,7 +79,13 @@ def pedigree_flag(
     inferred: str,
     **overrides: object,
 ) -> dict:
-    """A relatedness_mismatch flag as stored in SG meta."""
+    """
+    A relatedness_mismatch flag as stored in SG meta.
+
+    `inferred` is a measured degree from utils.infer_degree, not a peddy label. The verdict is
+    computed with the real classifier rather than hardcoded, so a fixture can never disagree with
+    the logic under test.
+    """
     return {
         **_base('relatedness_mismatch', f'{sg_id_1}_{sg_id_2}'),
         'sg_id_1': sg_id_1,
@@ -86,6 +93,7 @@ def pedigree_flag(
         'family_external_id': family,
         'expected_relationship': expected,
         'inferred_relationship': inferred,
+        'verdict': relatedness_verdict(expected, inferred),
         'relatedness': 0.0214,
         'ibs0': 4821,
         'ibs2': 9033,
@@ -124,11 +132,19 @@ MOCK_FLAGS_BY_SG: dict[str, list[dict]] = {
     'CPG009': [
         self_relatedness_flag('CPG009', 'CPG011', participant='PID_G', relatedness=0.4218, ibs0=3902, ibs2=11244),
     ],
-    # FAM08: a refinement, not a conflict. Only the mother is on file, so the expected pedigree can
-    # only say 'siblings' while the genotypes say 'full siblings'. Belongs in the de-emphasised
-    # section. This is the single most common flag on real datasets.
+    # FAM08: a refinement, not a conflict. The pedigree records no path between these two, and the
+    # genotypes measure them as siblings, so it is a missing link rather than a contradiction.
+    # Belongs in the de-emphasised section.
     'CPG012': [
-        pedigree_flag('CPG012', 'CPG013', 'FAM08', expected='siblings', inferred='full siblings', relatedness=0.4873),
+        pedigree_flag(
+            'CPG012',
+            'CPG013',
+            'FAM08',
+            expected=UNSPECIFIED_RELATED,
+            inferred='siblings',
+            relatedness=0.4873,
+            ibs0=341,
+        ),
     ],
 }
 
