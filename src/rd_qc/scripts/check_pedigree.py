@@ -35,7 +35,7 @@ from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
 from cpg_utils.metamist_registration import create_new
 
-# Slack reporting buckets, most serious first.
+# Reporting buckets, most serious first
 MISMATCH_BUCKETS = ('identical', 'lost_relationship', 'extra_relationship', 'refinement')
 
 
@@ -138,7 +138,7 @@ def _check_sex(samples_df: pd.DataFrame) -> dict[str, SomalierSexInferenceFlag]:
 
 
 def _mismatch_bucket(expected_rel: str, measured_rel: str, verdict: str) -> str:
-    """Which Slack reporting bucket a flagged pair belongs in, most serious first."""
+    """Which reporting bucket a flagged pair belongs in, most serious first."""
     if measured_rel == DEGREE_IDENTICAL:
         return 'identical'
     if verdict == VERDICT_REFINEMENT:
@@ -150,7 +150,7 @@ def _mismatch_bucket(expected_rel: str, measured_rel: str, verdict: str) -> str:
 
 
 BUCKET_HEADINGS = {
-    'identical': '❗❗ {n} sample pair(s) whose genomes are identical but which are recorded as different individuals:',
+    'identical': '❗❗ {n} sample pair(s) inferred as identical but recorded as different individuals:',
     'lost_relationship': '❗ {n} sample pair(s) that are recorded as related, but measured as less related:',
     'extra_relationship': '⚠️ {n} sample pair(s) that are recorded as unrelated, but measured as related:',
 }
@@ -184,9 +184,8 @@ def _check_relatedness(
     """
     Compare what the pedigree expects against what somalier measured, pair by pair.
 
-    peddy is used only on our own expected pedigree, which is trustworthy. The relationship the
-    data supports comes from the kinship coefficient and ibs0 via `infer_degree`, not from
-    somalier's `--infer` reconstruction. See the note above infer_degree for why.
+    peddy is used only on the expected pedigree. The relationship the data supports
+    comes from the kinship coefficient and ibs0 via `infer_degree`.
     """
     info('*Relatedness:*')
     expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
@@ -262,11 +261,6 @@ def produce_flags(
     """
     Read the somalier relate outputs and produce every flag they imply, keyed by SG id.
 
-    This is the whole flag-producing half of the pedigree check, and it touches neither Metamist
-    nor Slack. It is separated out so the same flags can be regenerated locally from downloaded
-    somalier outputs without registering an analysis or posting to a channel, which is what
-    testing_scripts/local_pedigree_report.py does.
-
     Returns the flags plus both dataframes, which `run` needs for its logging.
     """
     logger.info(somalier_samples)
@@ -315,7 +309,7 @@ def run(
     html_url: str,
     output_json: str,
 ):
-    """Report pedigree inconsistencies, given somalier outputs."""
+    """Report pedigree inconsistencies given somalier outputs."""
 
     dataset = get_metamist().get_metamist_proj(dataset)
 
