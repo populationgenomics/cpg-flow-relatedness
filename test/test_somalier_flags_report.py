@@ -16,7 +16,9 @@ from fixtures.somalier_flags import (
 )
 
 from rd_qc.scripts.somalier_flags_report import (
+    INLINE_FLAG_LIMIT,
     SgFlags,
+    SGInfo,
     _fmt_num,
     collect_somalier_flags,
     flag_sg_key,
@@ -304,3 +306,27 @@ def test_resolved_section_is_absent_when_there_is_nothing_resolved():
 
     assert 'Resolved &mdash; past incidents' not in html
     assert 'class="resolved-section"' not in html
+
+
+def test_inline_flag_lines_are_capped_with_a_more_link():
+    # A real family can carry 50+ pedigree mismatches; rendering them all inline buries the rest.
+    many = [
+        pedigree_flag(f'CPG{i:03d}', f'CPG{i + 1:03d}', 'FAM09', expected='unrelated', inferred='full siblings')
+        for i in range(1, INLINE_FLAG_LIMIT + 4)
+    ]
+    groups = [{'id': 'CPG001', 'meta': {'somalier_flags': many}}]
+    infos = {
+        f'CPG{i:03d}': SGInfo(
+            **{**vars(MOCK_SG_INFOS['CPG004']), 'sg_id': f'CPG{i:03d}', 'family_external_id': 'FAM09'}
+        )
+        for i in range(1, INLINE_FLAG_LIMIT + 5)
+    }
+    flagged = [sf for sf in collect_somalier_flags(groups) if sf.flags]
+    active, resolved = split_active_resolved(group_by_family(flagged, infos), infos)
+    summary = summarise_flags(flagged, total_sgs=1, families_affected=len(active))
+    html = render_report('mock', active, resolved, summary=summary, generated_at='2026-09-14T10:00:00+00:00')
+
+    assert active[0].total == INLINE_FLAG_LIMIT + 3
+    assert '+3 more &mdash; click to expand' in html
+    # Every flag still reaches the page, just via the expanded detail table.
+    assert html.count('full siblings') > INLINE_FLAG_LIMIT

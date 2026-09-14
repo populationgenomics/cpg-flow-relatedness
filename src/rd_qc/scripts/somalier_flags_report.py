@@ -68,6 +68,11 @@ CATEGORY_ORDER = ['sex', 'self', 'pedigree']
 # Only render the filter bar when there is actually something to filter.
 MIN_GROUPS_FOR_FILTER_BAR = 5
 
+# How many flag lines a family group shows inline before collapsing the rest behind its expand.
+# Real datasets have families with 50+ pedigree mismatches (perth-neuro family 8718 has 57), and
+# rendering those inline buries every other family under a wall of text.
+INLINE_FLAG_LIMIT = 5
+
 DATASET_SGS_QUERY = gql(
     """
     query datasetSgs($dataset: String!, $seqType: String!, $seqTech: String!) {
@@ -734,6 +739,7 @@ def render_report(
         resolved_groups=resolved_groups,
         summary=summary,
         category_chips=chips,
+        inline_flag_limit=INLINE_FLAG_LIMIT,
         show_filter_bar=len(chips) > 1 or len(active_groups) > MIN_GROUPS_FOR_FILTER_BAR,
         cross_family_mark=CROSS_FAMILY_MARK,
         dash=DASH,

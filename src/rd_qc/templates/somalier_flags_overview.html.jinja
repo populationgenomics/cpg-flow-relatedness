@@ -71,6 +71,7 @@
         .flag-line .result { color: #2d3436; }
         .flag-line .cross-family { display: inline-block; margin-left: 4px; color: #b9770e;
                                    font-size: 0.78rem; font-weight: 600; }
+        .more-flags { font-size: 0.8rem; color: #0984e3; margin-top: 6px; padding-left: 10px; }
 
         .badge { display: inline-block; padding: 2px 9px; border-radius: 12px;
                  font-size: 0.72rem; font-weight: 600; }
@@ -134,7 +135,9 @@
             </td>
             <td>
                 <div class="flag-count">{{ group.count_summary }}</div>
-                {% for f in group.flags %}
+                {# Capped inline: a family can carry 50+ mismatches, and rendering them all here
+                   buries every other family. The rest sit behind the row expand. #}
+                {% for f in group.flags[:inline_flag_limit] %}
                 <div class="flag-line {{ 'is-resolved' if f.resolved else '' }}">
                     <span class="badge cat-{{ f.category_key }}">{{ f.category_label }}</span>
                     <span class="subject">{{ f.subject }}</span>
@@ -145,6 +148,9 @@
                     {%- endif %}
                 </div>
                 {% endfor %}
+                {% if group.flags | length > inline_flag_limit %}
+                <div class="more-flags">+{{ (group.flags | length) - inline_flag_limit }} more &mdash; click to expand</div>
+                {% endif %}
             </td>
             <td class="toggle">&#9656;</td>
         </tr>
