@@ -13,13 +13,15 @@ Collect the inputs first. Find the run's AR GUID:
             'meta:{stage:\\"SomalierPedigreeCheck\\"}){timestampCompleted outputs}}}')
     print(query(q, variables={'d': 'DATASET'}))"
 
-then pull the directory it points at:
+then pull the two files it points at:
 
-    gcloud storage cp 'gs://cpg-<ds>[-test]/[<subdir>/]somalier_checks/pedigree/<AR_GUID>/*' \\
+    gcloud storage cp 'gs://cpg-<ds>[-test]/[<subdir>/]somalier_checks/pedigree/<AR_GUID>/*.tsv' \\
         local_data/<ds>/
 
-That directory holds <ds>.samples.tsv, <ds>.pairs.tsv, <ds>.expected.ped and <ds>.checks.json.
-Then:
+Only samples.tsv and pairs.tsv are needed, because they are raw `somalier relate` output and so
+are unaffected by any change to our own code. The expected PED is rebuilt from Metamist on every
+run via build_ped_content, exactly as the stage does, and the flags are re-derived locally from
+the TSVs, so the run's checks.json is never consulted unless you ask for it. Then:
 
     SM_ENVIRONMENT=production uv run python testing_scripts/local_pedigree_report.py \\
         --input-dir local_data/<ds> --dataset <ds> --output local_data/<ds>/report.html
@@ -30,6 +32,7 @@ SG's meta are passed through untouched rather than reconciled against an empty s
 wrongly mark every one of them resolved.
 """
 
+import csv
 import json
 import sys
 from argparse import ArgumentParser
@@ -61,8 +64,13 @@ from rd_qc.scripts.somalier_flags_report import (  # noqa: E402
     split_active_resolved,
     summarise_flags,
 )
+from rd_qc.utils import build_ped_content, get_project_sgs_and_fingerprints  # noqa: E402
 
+from cpg_utils.config import set_config_paths  # noqa: E402
 from metamist.graphql import gql, query  # noqa: E402
+
+# PED sex codes, as build_ped_content writes them.
+PED_SEX = {'1': 'male', '2': 'female'}
 
 # Deliberately not the report's DATASET_SGS_QUERY: this one takes the sequencing type and
 # technology as plain arguments so the harness needs no workflow config to run.
@@ -95,10 +103,12 @@ def find_input(input_dir: Path, suffix: str) -> Path:
 # Metamist, read-only, cached to disk so repeat renders need no network
 # ---------------------------------------------------------------------------
 def load_cache(cache: Path) -> dict:
-    if not cache.exists():
-        return {'sgs': None, 'infos': {}}
-    raw = json.loads(cache.read_text())
-    return {'sgs': raw.get('sgs'), 'infos': raw.get('infos') or {}}
+    """Load the snapshot, preserving any keys this version does not know about."""
+    raw = json.loads(cache.read_text()) if cache.exists() else {}
+    raw.setdefault('sgs', None)
+    raw.setdefault('infos', {})
+    raw.setdefault('expected_ped', None)
+    return raw
 
 
 def save_cache(cache: Path, snapshot: dict) -> None:
@@ -112,6 +122,68 @@ def as_sg_infos(raw: dict) -> dict[str, SGInfo]:
         sg_id: SGInfo(**{**fields, 'fastq_pairs': [tuple(pair) for pair in fields['fastq_pairs']]})
         for sg_id, fields in raw.items()
     }
+
+
+def write_local_config(input_dir: Path, dataset: str, access_level: str, seq_type: str, seq_tech: str) -> Path:
+    """
+    The minimum CPG config that rd_qc.utils' Metamist helpers need, so this harness can run
+    without an analysis-runner invocation. Written into the input directory to stay inspectable.
+    """
+    path = input_dir / 'local_config.toml'
+    path.write_text(
+        '[workflow]\n'
+        f"dataset = '{dataset}'\n"
+        f"access_level = '{access_level}'\n"
+        f"sequencing_type = '{seq_type}'\n"
+        f"sequencing_technology = '{seq_tech}'\n"
+    )
+    set_config_paths([str(path)])
+    return path
+
+
+def generate_expected_ped(dataset: str, output: Path) -> str:
+    """
+    Build the expected PED from Metamist, the same way SomalierPedigreeCheck does at
+    orchestration time (stages.py:192), rather than trusting a copy downloaded from GCS.
+
+    filter_sgs=True mirrors the stage, restricting to SGs that match the configured sequencing
+    type and technology.
+    """
+    index = get_project_sgs_and_fingerprints(dataset, filter_sgs=True)
+    content = build_ped_content(dataset, index)
+    output.write_text(content)
+    logger.info(f'Generated expected PED for {len(index.by_sg)} SG(s) from Metamist: {output}')
+    return content
+
+
+def warn_on_stale_provided_sex(ped_content: str, samples_tsv: Path) -> None:
+    """
+    somalier bakes the PED's sex column into samples.tsv as `original_pedigree_sex`, and that
+    frozen value is what `_check_sex` compares against. So regenerating the PED refreshes the
+    relatedness half of the check but not the sex half. Warn when the two disagree, which means
+    the pedigree changed in Metamist after the relate job ran.
+    """
+    ped_sex = {}
+    for line in ped_content.splitlines():
+        parts = line.split('\t')
+        if len(parts) >= 5:  # noqa: PLR2004
+            ped_sex[parts[1]] = PED_SEX.get(parts[4], 'unknown')
+
+    stale = []
+    with samples_tsv.open() as f:
+        for row in csv.DictReader(f, delimiter='\t'):
+            provided = row.get('original_pedigree_sex') or 'unknown'
+            provided = 'unknown' if provided == '-9' else provided
+            fresh = ped_sex.get(row['sample_id'])
+            if fresh is not None and fresh != provided:
+                stale.append(f'{row["sample_id"]} (somalier saw {provided}, Metamist now says {fresh})')
+
+    if stale:
+        logger.warning(
+            f'{len(stale)} sample(s) whose provided sex changed in Metamist since the relate job ran. '
+            'The relatedness flags below are fresh, but their sex-inference flags are computed against '
+            f'the stale value baked into samples.tsv: {"; ".join(stale[:10])}'
+        )
 
 
 def fetch_dataset_sgs(dataset: str, seq_type: str, seq_tech: str) -> list[dict]:
@@ -213,6 +285,12 @@ def parse_args():
     parser.add_argument('--cache', type=Path, help='snapshot JSON (default: <input-dir>/metamist_snapshot.json)')
     parser.add_argument('--sequencing-type', default='genome')
     parser.add_argument('--sequencing-technology', default='short-read')
+    parser.add_argument('--access-level', default='full', help="'full'/'standard' use the dataset name as given")
+    parser.add_argument(
+        '--expected-ped',
+        type=Path,
+        help='use this PED instead of building one from Metamist (escape hatch for an edited pedigree)',
+    )
     parser.add_argument('--refresh', action='store_true', help='re-query Metamist even if the snapshot exists')
     parser.add_argument('--offline', action='store_true', help='never query Metamist; use the cached snapshot only')
     parser.add_argument(
@@ -223,17 +301,48 @@ def parse_args():
     return parser.parse_args()
 
 
-def derive_flags(input_dir: Path, from_checks_json: bool) -> dict[str, list[dict]]:
+def resolve_expected_ped(input_dir: Path, dataset: str, snapshot: dict, args) -> tuple[Path, str]:
+    """
+    Get the expected PED, rebuilt from Metamist on every online run so it always reflects the
+    current pedigree rather than whatever the relate job happened to run with.
+
+    The content is cached into the snapshot purely so `--offline` re-renders keep working.
+    `--expected-ped` overrides with a local file, the escape hatch for testing an edited pedigree.
+    """
+    if args.expected_ped:
+        content = args.expected_ped.read_text()
+        logger.info(f'Using the expected PED given on the command line: {args.expected_ped}')
+        return args.expected_ped, content
+
+    path = input_dir / f'{dataset}.metamist.expected.ped'
+    if args.offline:
+        content = snapshot.get('expected_ped')
+        if not content:
+            raise SystemExit(f'--offline given but no cached expected PED exists for {dataset} yet')
+        path.write_text(content)
+        logger.info(f'Using the cached Metamist-derived expected PED: {path}')
+        return path, content
+
+    content = generate_expected_ped(dataset, path)
+    snapshot['expected_ped'] = content
+    return path, content
+
+
+def derive_flags(input_dir: Path, expected_ped: Path, from_checks_json: bool) -> dict[str, list[dict]]:
     """Produce the flags locally from the downloaded somalier outputs."""
     if from_checks_json:
         new_flags_by_sg = flags_from_checks_json(find_input(input_dir, '.checks.json'))
-        logger.info(f'Loaded flags for {len(new_flags_by_sg)} SG(s) from checks.json')
+        logger.warning(
+            f'Loaded flags for {len(new_flags_by_sg)} SG(s) straight from checks.json. These were '
+            'produced by whatever version of check_pedigree ran in that job, so they will not '
+            'reflect any local changes to the check. Drop the flag to re-derive them.'
+        )
         return new_flags_by_sg
 
     flags_by_sg, _, _ = produce_flags(
         somalier_samples=str(find_input(input_dir, '.samples.tsv')),
         somalier_pairs=str(find_input(input_dir, '.pairs.tsv')),
-        expected_ped_path=str(find_input(input_dir, '.expected.ped')),
+        expected_ped_path=str(expected_ped),
     )
     new_flags_by_sg = {sg_id: [asdict(f) for f in flags] for sg_id, flags in flags_by_sg.items()}
     logger.info(f'Derived flags for {len(new_flags_by_sg)} SG(s) from the somalier TSVs')
@@ -259,9 +368,22 @@ def main() -> None:
     cache: Path = args.cache or input_dir / 'metamist_snapshot.json'
     today = datetime.now(tz=UTC).isoformat(timespec='seconds')
 
-    new_flags_by_sg = derive_flags(input_dir, args.from_checks_json)
+    write_local_config(
+        input_dir,
+        dataset=args.dataset,
+        access_level=args.access_level,
+        seq_type=args.sequencing_type,
+        seq_tech=args.sequencing_technology,
+    )
 
     snapshot = load_cache(cache)
+    expected_ped, ped_content = resolve_expected_ped(input_dir, args.dataset, snapshot, args)
+    save_cache(cache, snapshot)
+
+    new_flags_by_sg = derive_flags(input_dir, expected_ped, args.from_checks_json)
+    if not args.from_checks_json:
+        warn_on_stale_provided_sex(ped_content, find_input(input_dir, '.samples.tsv'))
+
     resolve_dataset_sgs(cache, snapshot, args)
 
     # 3. Reconcile in memory. Nothing is written back to Metamist.
