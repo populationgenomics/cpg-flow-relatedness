@@ -25,7 +25,7 @@ def somalier_flags_report_job(
 
     j.command(
         f"""\
-    python3 -m align_genotype.scripts.somalier_flags_report \\
+    python3 -m rd_qc.scripts.somalier_flags_report \\
         --dataset {dataset} \\
         --output-html {outputs['timestamped']} \\
         --base-output-html {outputs['html']} \\

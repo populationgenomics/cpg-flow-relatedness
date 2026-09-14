@@ -20,6 +20,7 @@ Four defects need fixing before anything else works:
 2. `somalier_flags_report.py:240` computes `active_relatedness_flags` by iterating `all_flags` rather than `active`, so resolved pedigree flags are counted as active. The two sibling counts on lines 238 and 239 iterate `active` correctly, which is what makes this look like a slip rather than intent.
 3. `render_report` never passes `generated_at`, which the template reads at line 242.
 4. `src/rd_qc/jobs/somalier_flags_report.py:28` invokes `python3 -m align_genotype.scripts.somalier_flags_report`. The module lives at `rd_qc.scripts.somalier_flags_report`, so the Hail Batch job fails immediately.
+5. `config.dataset_for_access_level` was added in cpg-utils 5.7.2, and the only constraint on it was the loose transitive one from `cpg-flow~=1.3`. This was a local-only breakage, not a CI one: CI resolves fresh via `pip install .[test]` and was green at 0509628, but the untracked local `uv.lock` had pinned 5.7.0, which broke the report's import along with all four `stages.py` call sites (lines 25, 47, 75, 102) and three `test_stage_scoping.py` tests. Pinned `cpg-utils>=5.7.2` in `pyproject.toml` regardless, because the floor is real and neither CI nor the Docker build reads a lockfile, so pyproject is the only place that can enforce it.
 
 ## Two findings that shape the design
 
@@ -45,7 +46,9 @@ Group by family. A family is the natural review unit for relatedness, and it is 
 Structure is two sections, mirroring the QC report:
 
 - `⚠ Families with flags`, the headline, groups rendered open so flags are visible without clicking.
-- `✓ Resolved, past incidents`, the same macro at 72% opacity with groups collapsed.
+- `✓ Resolved, past incidents`, the same macro at 72% opacity.
+
+In both sections the flag lines themselves are always visible, one line each, and it is the detail row (measured values plus per-SG metadata) that starts collapsed. Hiding the flag lines in the resolved section would leave a backlog you cannot read without clicking every row, which defeats the point of showing it.
 
 A family with both active and resolved flags appears in both sections, showing only the relevant flags in each. Colour semantics carry over from the QC report: red only when active flags exist, green only for the all-clear banner, grey for resolved and neutral counts. A flag count is never green.
 
@@ -62,7 +65,9 @@ class FlagRow:
     category_key: str        # 'sex' | 'self' | 'pedigree', for filter chips and data-* attributes
     category_label: str      # 'Sex inference' | 'Self-relatedness' | 'Pedigree relatedness'
     identity: tuple          # dataset-wide dedup and count key
+    sg_key: str              # the resolved sequencing_group_key, used to collect a group's SGInfos
     subject: str             # 'PID_C / CPG004' or 'CPG004 <-> CPG005'
+    subject_detail: str      # participant behind the pair: 'PID_B' or 'PID_C <-> PID_D'
     result: str              # 'provided female / inferred male'
     details: tuple[tuple[str, str], ...]   # metric label to formatted value, for the expanded table
     cross_family: str | None # the other family, set only on duplicated cross-family rows
@@ -71,6 +76,7 @@ class FlagRow:
     date_full: str
     resolution_date_short: str
     resolution_date_full: str
+    search_blob: str         # lowercased, rolled up into the group's own search text
 
 
 @dataclass(frozen=True)
@@ -90,11 +96,27 @@ class FamilyGroup:
 
 | category | identity |
 | --- | --- |
-| sex | `('sex', sg_id, provided, inferred)` |
-| self | `('self', sg_id_1, sg_id_2, participant_external_id, threshold)` |
-| pedigree | `('pedigree', sg_id_1, sg_id_2, expected_relationship, inferred_relationship)` |
+| sex | `('sex', sequencing_group_key, provided, inferred)` |
+| self | `('self', sequencing_group_key, participant_external_id, threshold)` |
+| pedigree | `('pedigree', sequencing_group_key, expected_relationship, inferred_relationship)` |
 
 These mirror the recording script's own identity keys (`record_somalier_flags.py:97`, `:161`, `:222`), so the report and the resolved/unresolved lifecycle agree on what counts as the same flag. The measured values (`relatedness`, `ibs0`, `ibs2`, and the sex statistics) are excluded from identity in both places because they drift between relate runs.
+
+## The persisted sequencing group key
+
+`SomalierFlag` gains one field, which is the flag's answer to "which sequencing groups am I about?":
+
+```python
+sequencing_group_key: str = ''
+```
+
+The value is the sorted, underscore-joined set of SG IDs the flag involves, so `CPG001` for a sex flag and `CPG002_CPG003` for either kind of pairwise flag. `sg_ids_tag` (`utils.py:348`) already computes exactly this and is reused rather than reimplemented.
+
+It is populated in `record_somalier_flags.py`, not in the two producer scripts. That file already rebuilds the per-category identity tuples three times over (lines 97, 161, 222), so it is where identity logic belongs, and setting the key during reconciliation means one code path covers flags from both producers.
+
+The field defaults to `''` so that every flag already sitting in Metamist still deserialises. The report therefore needs a fallback for legacy flags: when `sequencing_group_key` is empty, derive it from `sg_id_1` and `sg_id_2` for pairwise categories, or from the owning SG ID for sex flags. That fallback is the only place the report looks at those fields directly.
+
+This closes both of the TODOs added on 2026-09-14, at `utils.py:117` and `somalier_flags_report.py:300`. The second one is closed because `referenced_sg_ids` can now split the key on `_` to learn every SG a flag touches, rather than needing per-category knowledge of where the partner ID lives.
 
 ## Pipeline
 
@@ -102,7 +124,7 @@ These mirror the recording script's own identity keys (`record_somalier_flags.py
 main
  |- query DATASET_SGS_QUERY                     unchanged
  |- collect_somalier_flags  -> list[SgFlags]    rewrite: dispatch on category
- |- referenced_sg_ids       -> set[str]         new: owning sg, plus sg_id_1 and sg_id_2
+ |- referenced_sg_ids       -> set[str]         new: split sequencing_group_key on '_'
  |- get_sg_infos            -> dict[str, SGInfo] unchanged, already keyed by id
  |- build_flag_rows         -> list[FlagRow]    new: one branch per category
  |- group_by_family         -> list[FamilyGroup] new: the core of this design
@@ -173,11 +195,11 @@ Verify the look offline rather than against the live API, which dodges the trans
 - a family carrying both active and resolved flags
 - a sequencing group with no family at all, exercising the participant fallback
 
-`testing_scripts/render_mock_somalier_report.py` feeds those through `collect_somalier_flags`, `group_by_family` and `render_report`, then writes `/tmp/somalier_flags_report.html` plus a second all-clear render with no active flags. No Metamist, fully deterministic, so the page can be iterated on before any live run.
+`testing_scripts/render_mock_somalier_report.py` feeds those through `collect_somalier_flags`, `group_by_family` and `render_report`, then writes `somalier_flags_report.html` plus a second all-clear render into `--output-dir` (the system temp directory by default, rather than a hardcoded `/tmp`, which trips ruff's `S108`). It also prints the resolved group structure, so the page can be sanity checked without opening a browser. No Metamist, fully deterministic.
 
 ## Tests
 
-`test/test_somalier_flags_report.py`, pure functions only, no database. The `test/**/*.py` per-file-ignores block in `pyproject.toml:88` currently exempts only `S101`, so `PLR2004` and `RUF001` will probably need adding when the fixtures land.
+`test/test_somalier_flags_report.py`, pure functions only, no database. The `test/**/*.py` per-file-ignores block in `pyproject.toml` exempted only `S101`, so `PLR2004` was added: an expected count is the whole point of an assertion. `RUF001` turned out not to be needed, since ruff does not treat `↔` or `·` as ambiguous.
 
 Cases:
 
@@ -203,4 +225,4 @@ uv run --with ruff ruff check src/ test/ testing_scripts/
 
 `construct_summary_message` (`somalier_flags_report.py:264`) is an empty stub called from `main`. It returns `None` harmlessly so the report works, but the Slack summary does nothing and `get_previous_analysis` is queried for no reason. Left alone here.
 
-Adding a severity field to the three dataclasses in `utils.py` is also out of scope, per the decision above.
+Adding a *severity* field to the flag dataclasses stays out of scope, per the decision above. Note that this is narrower than it was: `sequencing_group_key` is now in scope, so `utils.py` and `record_somalier_flags.py` do both get touched, just not for severity.

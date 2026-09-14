@@ -143,7 +143,7 @@ def test_changed_identity_resolves_the_old_flag_and_adds_a_new_one(written_meta)
     reconcile(current_flags=[relatedness_flag()], new_flags=[reinferred])
 
     written = written_meta['sgMeta']['somalier_flags']
-    assert len(written) == 2  # noqa: PLR2004
+    assert len(written) == 2
 
     by_inferred = {flag['inferred_relationship']: flag for flag in written}
     assert by_inferred['unrelated']['resolved'] is True

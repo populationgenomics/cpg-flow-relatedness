@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from loguru import logger
 
-from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
+from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag, sg_ids_tag
 
 from metamist.graphql import gql, query
 
@@ -38,6 +38,21 @@ SG_META_MUTATION = gql(
     }
     """
 )
+
+
+def sequencing_group_key(flag: dict, sg_id: str) -> str:
+    """
+    Sorted, underscore-joined SG IDs that this flag involves.
+
+    Pairwise flags (self-relatedness, relatedness) are about two SGs but are recorded against
+    only the first of the pair, so this key is what lets a reader work out which SGs a flag
+    touches without needing per-category knowledge of where the partner ID lives. Per-SG flags
+    (sex inference) key on the SG that owns them.
+    """
+    sg_id_1, sg_id_2 = flag.get('sg_id_1'), flag.get('sg_id_2')
+    if sg_id_1 and sg_id_2:
+        return sg_ids_tag([sg_id_1, sg_id_2])
+    return sg_id
 
 
 def compare_somalier_sex_inference_flag(current_flag: dict, new_flag: dict) -> bool:
@@ -119,7 +134,7 @@ def reconcile_sg_somalier_sex_inference_flags(
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (provided/inferred) is unchanged so this counts as 'retained', not 'updated'.
             new_flag = new_somalier_sex_inference_flags_by_key[flag_key]
-            flag |= {  # noqa: PLW2901
+            flag |= {
                 key: new_flag[key]
                 for key in ['mean_depth', 'x_het_ratio', 'x_depth_ratio', 'y_depth_ratio', 'p_middling_ab']
             }
@@ -296,6 +311,13 @@ def reconcile_sg_somalier_flags(
     if not unresolved_current_flags and not new_somalier_flags:
         logger.info(f'{sg_id} :: No unresolved existing or new {report} flags for this SG, skipping.')
         return  # No unresolved existing or new Somalier flags for this SG, skip
+
+    # Stamp the SG key onto every flag before reconciling, so that both the retained and the
+    # newly-added paths below carry it, and so that flags recorded before this field existed
+    # pick it up on the next run. Mutates in place to match how the reconcile functions below
+    # already update these same dicts.
+    for flag in (*current_somalier_flags, *new_somalier_flags):
+        flag['sequencing_group_key'] = sequencing_group_key(flag, sg_id)
 
     new_somalier_sex_inference_flags_by_key = {
         (f['provided'], f['inferred']): f for f in new_somalier_flags if f['category'] == 'sex_inference_mismatch'

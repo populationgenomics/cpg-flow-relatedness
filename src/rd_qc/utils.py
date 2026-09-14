@@ -115,6 +115,12 @@ class SomalierFlag:
     """Generic flag class for somalier QC checks."""
 
     category: str | None = None
+    # Sorted, underscore-joined SG IDs this flag involves: 'CPG001' for per-SG flags,
+    # 'CPG002_CPG003' for pairwise ones. Set during reconciliation in record_somalier_flags.py,
+    # which is also where the per-category identity keys live. Defaults to '' so that flags
+    # already recorded in Metamist without the field still deserialise; readers fall back to
+    # deriving it from sg_id_1/sg_id_2.
+    sequencing_group_key: str = ''
     date: str = field(default_factory=lambda: datetime.now(tz=UTC).isoformat(timespec='seconds'))
     ar_guid: str = field(default_factory=try_get_ar_guid)
     resolved: bool = False
