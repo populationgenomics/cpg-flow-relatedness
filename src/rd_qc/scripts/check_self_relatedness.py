@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from rd_qc.utils import SomalierSelfRelatednessFlag
+from rd_qc.utils import SomalierSelfRelatednessFlag, get_somalier_relate_analyses
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
@@ -46,8 +46,36 @@ def write_result_json(
             json.dump(result, f, indent=2)
 
 
+def register_analysis(
+    dataset: str,
+    participant_id: int,
+    participant_external_id: str,
+    sg_ids: list[str],
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
+    output_json: str,
+    flagged: bool,
+):
+    meta = {
+        'stage': 'SomalierSelfCheck',
+        'participant_id': participant_id,
+        'participant_external_id': participant_external_id,
+        'flagged': flagged,
+    }
+    create_new(
+        project=dataset,
+        output=output_pairs,
+        analysis_type='somalier_relate',
+        sgs=sg_ids,
+        meta=meta,
+        secondary={'samples': output_samples, 'html': output_html, 'json': output_json},
+    )
+
+
 def run(
     dataset: str,
+    participant_id: int,
     participant_external_id: str,
     sg_ids: list[str],
     somalier_pairs: str,
@@ -102,7 +130,7 @@ def run(
     passed = len(low_relatedness_pairs) == 0
     if passed:
         # All pairs have relatedness above the threshold, exit early
-        logger.info(f'{participant_external_id}: All pairs have relatedness >= {relatedness_threshold}')
+        logger.info(f'{participant_id} ({participant_external_id}): All pairs have relatedness >= {relatedness_threshold}')
         write_result_json(
             dataset=dataset,
             participant_external_id=participant_external_id,
@@ -112,10 +140,42 @@ def run(
             flags_by_sg_id={},
             output_json=output_json,
         )
-        # Maybe we should write the analysis for the first pass anyway, and then for subsequent reruns
-        # if nothing changes (i.e. still no flags) THEN do nothing, i.e. don't update the existing
-        # analysis record. This will let us have analysis records for each self-relatedness run, even
-        # if there are no issues flagged, it's still valid to keep the analysis record.
+        # Check for existing analyses for this participant and write a new analysis record if none exists
+        analyses = get_somalier_relate_analyses(dataset)
+        found = False
+        for analysis in analyses:
+            # Analysis might be keyed on the integer participant id or the string external ID
+            if analysis['meta'].get('participant_id') == participant_id \
+            or analysis['meta'].get('participant_id') == participant_external_id \
+            or analysis['meta'].get('participant_external_id') == participant_external_id:
+                found = True
+                analysis_id = analysis['id']
+                logger.info(f'Found existing analysis {analysis_id} for participant {participant_external_id}')
+                if not analysis['meta'].get('flagged', False):
+                    # Still passing the relatedness check, no need to flag
+                    pass
+                else:
+                    # The analysis is flagged, warn the user but continue
+                    logger.warning(
+                        f'Existing analysis analysis {analysis_id} for participant {participant_external_id} '
+                        f'is flagged, but the current check passed. Consider updating the analysis record.')
+                    # TODO: Consider whether to update the existing analysis record to reflect the new passing status
+                    # this will involve checking the SG IDs involved for consistency with the new passing status
+                    # For now, warning is the only action taken
+
+        if not found:
+            logger.info(f'No existing analysis found for participant {participant_external_id}')
+            register_analysis(
+                dataset=dataset,
+                participant_id=participant_id,
+                participant_external_id=participant_external_id,
+                sg_ids=sg_ids,
+                output_pairs=output_pairs,
+                output_samples=output_samples,
+                output_html=output_html,
+                output_json=output_json,
+                flagged=False,
+            )
         return
 
     flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]] = {}
@@ -171,20 +231,16 @@ def run(
         output_json=output_json,
     )
 
-    # Register results in metamist
-    meta = {
-        'stage': 'SomalierSelfCheck',
-        'participant_id': participant_external_id,
-        'relatedness_threshold': relatedness_threshold,
-    }
-
-    create_new(
-        project=dataset,
-        output=output_pairs,
-        analysis_type='somalier_relate',
-        sgs=sg_ids,
-        meta=meta,
-        secondary={'samples': output_samples, 'html': output_html, 'json': output_json},
+    register_analysis(
+        dataset=dataset,
+        participant_id=participant_id,
+        participant_external_id=participant_external_id,
+        sg_ids=sg_ids,
+        output_pairs=output_pairs,
+        output_samples=output_samples,
+        output_html=output_html,
+        output_json=output_json,
+        flagged=True,
     )
     logger.info(f'Registered somalier_relate analysis for participant {participant_external_id}')
     logger.info(html_url)
@@ -193,7 +249,8 @@ def run(
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--participant-id', required=True, help='External ID of the participant')
+    parser.add_argument('--participant-id', required=True, type=int, help='Internal ID of the participant')
+    parser.add_argument('--participant-external-id', required=True, help='External ID of the participant')
     parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
     parser.add_argument('--somalier-pairs', required=True, help='Somalier pairs.tsv file from relate job')
     parser.add_argument('--somalier-samples', required=True, help='Somalier samples.tsv file from relate job')
@@ -205,7 +262,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     run(
         dataset=args.dataset,
-        participant_external_id=args.participant_id,
+        participant_id=args.participant_id,
+        participant_external_id=args.participant_external_id,
         sg_ids=args.sg_ids,
         somalier_pairs=args.somalier_pairs,
         somalier_samples=args.somalier_samples,

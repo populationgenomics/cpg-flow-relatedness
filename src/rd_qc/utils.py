@@ -26,6 +26,7 @@ SG_QUERY = gql("""
                 technology
                 sample {
                     participant {
+                        id
                         externalId
                     }
                 }
@@ -53,6 +54,21 @@ ANALYSIS_QUERY = gql("""
                     participant {
                         externalId
                     }
+                }
+            }
+        }
+    }
+""")
+
+SOMALIER_RELATE_ANALYSES_QUERY = gql("""
+    query SgSomalierRelateAnalyses($project: String!) {
+        project(name: $project) {
+            analyses(type: {in_: ["somalier_relate"]}) {
+                outputs
+                type
+                meta
+                sequencingGroups {
+                    id
                 }
             }
         }
@@ -95,6 +111,7 @@ class SgSomalierInfo:
     """Somalier fingerprint state for a single sequencing group."""
 
     sg_id: str
+    participant_id: int
     participant_external_id: str
     somalier_path: str | Path | None
 
@@ -103,10 +120,10 @@ class SomalierIndex:
     """Dual-indexed view of somalier data: O(1) lookup by participant or sg_id."""
 
     def __init__(self, entries: list[SgSomalierInfo]):
-        self.by_participant: dict[str, list[SgSomalierInfo]] = {}
+        self.by_participant: dict[tuple[int, str], list[SgSomalierInfo]] = {}
         self.by_sg: dict[str, SgSomalierInfo] = {}
         for info in entries:
-            self.by_participant.setdefault(info.participant_external_id, []).append(info)
+            self.by_participant.setdefault((info.participant_id, info.participant_external_id), []).append(info)
             self.by_sg[info.sg_id] = info
 
 
@@ -343,10 +360,11 @@ def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> 
                 logger.debug(f'{sg["id"]}: skipping SG with sequencing technology {seq_tech}')
                 continue
         sg_id = sg['id']
+        participant_id = sg['sample']['participant']['id']
         participant_external_id = sg['sample']['participant']['externalId']
         analyses = sg['analyses']
         somalier_path = analyses[0]['outputs'].get('path') if analyses else None
-        entries.append(SgSomalierInfo(sg_id, participant_external_id, somalier_path))
+        entries.append(SgSomalierInfo(sg_id, participant_id, participant_external_id, somalier_path))
 
     return SomalierIndex(entries)
 
@@ -410,6 +428,20 @@ def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> tup
 
     return targets, sg_id_map
 
+@cache
+def get_somalier_relate_analyses(project: str) -> dict[str, list[dict]]:
+    """
+    Retrieve all somalier relate analyses for the given project.
+    """
+    resolved = get_metamist().get_metamist_proj(project)
+    response = query(SOMALIER_RELATE_ANALYSES_QUERY, variables={'project': resolved})
+    analyses_by_sg: dict[str, list[dict]] = {}
+    for analysis in response['project']['analyses']:
+        sgs = analysis['sequencingGroups']
+        for sg in sgs:
+            sg_id = sg['id']
+            analyses_by_sg.setdefault(sg_id, []).append(analysis)
+    return analyses_by_sg
 
 @cache
 def get_project_pedigree(project: str) -> list[dict]:

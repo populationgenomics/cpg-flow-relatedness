@@ -104,17 +104,17 @@ class SomalierSelfCheck(stage.DatasetStage):
         index = get_project_sgs_and_fingerprints(dataset_name)
 
         missing_participants = {
-            pid
-            for pid, sg_list in index.by_participant.items()
-            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not exists(outputs[f'{pid}_samples_tsv'])
+            peid
+            for (pid, peid), sg_list in index.by_participant.items()
+            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not exists(outputs[f'{peid}_samples_tsv'])
         }
 
         if not missing_participants:
             return self.make_outputs(dataset, data=outputs)
 
         all_jobs = []
-        for participant_id in missing_participants:
-            sg_list = index.by_participant[participant_id]
+        for pid, peid in [(pid, peid) for (pid, peid) in index.by_participant if peid in missing_participants]:
+            sg_list = index.by_participant[(pid, peid)]
 
             somalier_paths = {
                 info.sg_id: str(all_somalier[info.sg_id]) for info in sg_list if info.sg_id in all_somalier
@@ -124,10 +124,11 @@ class SomalierSelfCheck(stage.DatasetStage):
 
             jobs = relate.self_relatedness_jobs(
                 dataset_name=dataset_name,
-                participant_id=participant_id,
+                participant_id=pid,
+                participant_external_id=peid,
                 somalier_paths=somalier_paths,
                 outputs=outputs,
-                job_attrs={'participant': participant_id},
+                job_attrs={'participant_external_id': peid},
             )
             all_jobs.extend(jobs)
 

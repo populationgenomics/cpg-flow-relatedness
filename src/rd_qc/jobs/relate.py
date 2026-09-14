@@ -11,7 +11,8 @@ from cpg_utils import Path, config, hail_batch
 
 def self_relatedness_jobs(
     dataset_name: str,
-    participant_id: str,
+    participant_id: int,
+    participant_external_id: str,
     somalier_paths: dict[str, str | Path],
     outputs: dict[str, Path | str],
     job_attrs: dict[str, str],
@@ -26,7 +27,7 @@ def self_relatedness_jobs(
 
     # Job 1: somalier relate
     relate_j = batch_instance.new_bash_job(
-        f'Somalier identity check {participant_id}',
+        f'Somalier identity check {participant_external_id}',
         job_attrs | {'tool': 'somalier'},
     )
     relate_j.image(config.config_retrieve(['images', 'somalier']))
@@ -46,31 +47,32 @@ def self_relatedness_jobs(
     )
     relate_j.command(f'somalier relate -o {relate_j.output} inputs/*.somalier')
     relate_j.command(f'mv {relate_j.output}.html {relate_j.html_out}')
-    batch_instance.write_output(relate_j.output, outputs[f'{participant_id}_prefix'])
-    batch_instance.write_output(relate_j.html_out, outputs[f'{participant_id}_html'])
+    batch_instance.write_output(relate_j.output, outputs[f'{participant_external_id}_prefix'])
+    batch_instance.write_output(relate_j.html_out, outputs[f'{participant_external_id}_html'])
 
     check_j = batch_instance.new_bash_job(
-        f'Somalier identity alert {participant_id}',
+        f'Somalier identity alert {participant_external_id}',
         job_attrs,
     )
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
     check_j.depends_on(relate_j)
 
-    out_html_url = convert_to_web_url(dataset_name, outputs[f'{participant_id}_html'])
+    out_html_url = convert_to_web_url(dataset_name, outputs[f'{participant_external_id}_html'])
     sg_ids_str = ' '.join(sorted(somalier_paths.keys()))
 
     check_j.command(f"""\
 python3 -m rd_qc.scripts.check_self_relatedness \\
     --dataset {dataset_name} \\
     --participant-id {participant_id} \\
+    --participant-external-id {participant_external_id} \\
     --sg-ids {sg_ids_str} \\
     --somalier-pairs {relate_j.output['pairs.tsv']} \\
     --somalier-samples {relate_j.output['samples.tsv']} \\
-    --output-pairs {outputs[f'{participant_id}_pairs_tsv']!s} \\
-    --output-samples {outputs[f'{participant_id}_samples_tsv']!s} \\
-    --output-html {outputs[f'{participant_id}_html']!s} \\
+    --output-pairs {outputs[f'{participant_external_id}_pairs_tsv']!s} \\
+    --output-samples {outputs[f'{participant_external_id}_samples_tsv']!s} \\
+    --output-html {outputs[f'{participant_external_id}_html']!s} \\
     --html-url {out_html_url} \\
-    --output-json {outputs[f'{participant_id}_json']!s}
+    --output-json {outputs[f'{participant_external_id}_json']!s}
 """)
 
     return [relate_j, check_j]
