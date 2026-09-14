@@ -25,6 +25,7 @@ from rd_qc.utils import (
     SomalierRelatednessFlag,
     SomalierSelfRelatednessFlag,
     SomalierSexInferenceFlag,
+    is_pedigree_refinement,
     sg_ids_tag,
 )
 
@@ -166,6 +167,10 @@ class FlagRow:
     category_label: str
     identity: tuple
     sg_key: str
+    # 'conflict' when the pedigree and the genotypes disagree, 'refinement' when the pedigree is
+    # merely less specific. Refinements get their own de-emphasised section, because they
+    # outnumber conflicts on real datasets and bury them.
+    impact: str
     subject: str
     subject_detail: str
     result: str
@@ -566,12 +571,20 @@ def _flag_to_row(
     resolution_short, resolution_full = _date_parts(flag.resolution_date)
     sg_key = flag_sg_key(flag, owning_sg_id)
 
+    # Only pedigree flags can be refinements. A sex mismatch or a failed self-relatedness check is
+    # always a genuine disagreement.
+    refinement = category_key == 'pedigree' and is_pedigree_refinement(
+        flag.expected_relationship,
+        flag.inferred_relationship,
+    )
+
     return FlagRow(
         category=flag.category or '',
         category_key=category_key,
         category_label=CATEGORY_LABELS.get(category_key, category_key),
         identity=flag_identity(flag, sg_key),
         sg_key=sg_key,
+        impact='refinement' if refinement else 'conflict',
         subject=parts['subject'],
         subject_detail=parts['subject_detail'],
         result=parts['result'],
@@ -656,25 +669,52 @@ def group_by_family(sg_flags: list[SgFlags], infos: dict[str, SGInfo]) -> list[F
     return sorted(groups, key=_group_sort_key)
 
 
+def _infos_of(groups: list[FamilyGroup]) -> dict[str, SGInfo]:
+    """Recover the SGInfo lookup from groups that already carry it, so re-splitting needs no query."""
+    return {info.sg_id: info for group in groups for info in group.sg_infos}
+
+
+def _rebuild_subset(groups: list[FamilyGroup], infos: dict[str, SGInfo], keep) -> list[FamilyGroup]:
+    """
+    Rebuild each group holding only the rows that pass `keep`, dropping groups left empty.
+
+    Counts, summaries and search text are all recomputed against the filtered rows, which is what
+    lets one family appear in several sections showing only the flags relevant to each.
+    """
+    subset = [
+        _build_group(group.key, group.label, rows, infos)
+        for group in groups
+        if (rows := [row for row in group.flags if keep(row)])
+    ]
+    return sorted(subset, key=_group_sort_key)
+
+
 def split_active_resolved(
     groups: list[FamilyGroup],
     infos: dict[str, SGInfo],
 ) -> tuple[list[FamilyGroup], list[FamilyGroup]]:
-    """
-    Rebuild the groups twice over, once holding only unresolved flags and once only resolved ones.
+    """Split into (still unresolved, resolved). A family with both appears in both."""
+    return (
+        _rebuild_subset(groups, infos, lambda row: not row.resolved),
+        _rebuild_subset(groups, infos, lambda row: row.resolved),
+    )
 
-    Counts and summaries are recomputed against the filtered flag set, so a family with both kinds
-    appears in both sections showing only the flags relevant to each. A side with nothing left is
-    dropped.
+
+def split_by_impact(
+    groups: list[FamilyGroup],
+    infos: dict[str, SGInfo],
+) -> tuple[list[FamilyGroup], list[FamilyGroup]]:
     """
-    active: list[FamilyGroup] = []
-    resolved: list[FamilyGroup] = []
-    for group in groups:
-        for bucket, wanted in ((active, False), (resolved, True)):
-            rows = [row for row in group.flags if row.resolved is wanted]
-            if rows:
-                bucket.append(_build_group(group.key, group.label, rows, infos))
-    return sorted(active, key=_group_sort_key), sorted(resolved, key=_group_sort_key)
+    Split the active groups into (conflicts, refinements).
+
+    Refinements are where the recorded pedigree is simply less specific than the genotypes, and
+    they outnumber conflicts roughly 92 to 71 on perth-neuro, so leaving them mixed in hides every
+    real finding. See utils.is_pedigree_refinement.
+    """
+    return (
+        _rebuild_subset(groups, infos, lambda row: row.impact == 'conflict'),
+        _rebuild_subset(groups, infos, lambda row: row.impact == 'refinement'),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -696,10 +736,19 @@ def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: 
     active = [f for f in all_flags if not f.resolved]
     active_by_category = {key: sum(1 for f in active if CATEGORY_KEYS.get(f.category) == key) for key in CATEGORY_ORDER}
 
+    refinements = sum(
+        1
+        for f in active
+        if CATEGORY_KEYS.get(f.category) == 'pedigree'
+        and is_pedigree_refinement(f.expected_relationship, f.inferred_relationship)
+    )
+
     return {
         'total_sgs': total_sgs,
         'active_flags': len(active),
         'active_by_category': active_by_category,
+        'active_conflicts': len(active) - refinements,
+        'active_refinements': refinements,
         'families_affected': families_affected,
         'resolved_flags': sum(1 for f in all_flags if f.resolved),
     }
@@ -725,17 +774,24 @@ def render_report(
     summary: dict,
     generated_at: str | None = None,
 ) -> str:
-    """Render the Somalier flags report HTML using the Jinja template."""
+    """
+    Render the Somalier flags report HTML using the Jinja template.
+
+    Takes the active groups whole and splits them into conflicts and refinements here, so callers
+    only ever deal with the active/resolved distinction that matches the flag lifecycle.
+    """
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(JINJA_TEMPLATE_DIR),
         autoescape=jinja2.select_autoescape(['html', 'xml']),
     )
     template = env.get_template('somalier_flags_overview.html.jinja')
-    chips = category_chips(active_groups)
+    conflict_groups, refinement_groups = split_by_impact(active_groups, _infos_of(active_groups))
+    chips = category_chips(conflict_groups)
     return template.render(
         dataset=dataset,
         generated_at=generated_at or datetime.now(tz=UTC).isoformat(timespec='seconds'),
-        active_groups=active_groups,
+        conflict_groups=conflict_groups,
+        refinement_groups=refinement_groups,
         resolved_groups=resolved_groups,
         summary=summary,
         category_chips=chips,

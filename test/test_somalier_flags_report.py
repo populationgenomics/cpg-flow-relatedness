@@ -26,6 +26,7 @@ from rd_qc.scripts.somalier_flags_report import (
     referenced_sg_ids,
     render_report,
     split_active_resolved,
+    split_by_impact,
     summarise_flags,
 )
 from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
@@ -142,9 +143,9 @@ def test_cross_family_flag_is_counted_once_despite_appearing_twice():
 
     rendered_rows = sum(len(group.flags) for group in active)
 
-    # Seven rows on the page, but only six distinct flags: the cross-family pair is shown twice.
-    assert rendered_rows == 7
-    assert summary['active_flags'] == 6
+    # Eight rows on the page, but only seven distinct flags: the cross-family pair is shown twice.
+    assert rendered_rows == 8
+    assert summary['active_flags'] == 7
 
 
 def test_same_family_pedigree_flag_lands_in_one_group_only():
@@ -222,9 +223,12 @@ def test_summary_counts():
     _, active, _, summary = run_pipeline()
 
     assert summary == {
-        'total_sgs': 11,
-        'active_flags': 6,
-        'active_by_category': {'sex': 2, 'self': 2, 'pedigree': 2},
+        'total_sgs': 13,
+        'active_flags': 7,
+        'active_by_category': {'sex': 2, 'self': 2, 'pedigree': 3},
+        # Six of the seven are real disagreements; FAM08's siblings/full-siblings pair is not.
+        'active_conflicts': 6,
+        'active_refinements': 1,
         'families_affected': len(active),
         'resolved_flags': 2,
     }
@@ -296,7 +300,7 @@ def test_all_clear_banner_when_nothing_is_active():
     html = render_fixture_html(MOCK_ALL_CLEAR_SEQUENCING_GROUPS)
 
     assert 'All clear' in html
-    assert 'Families with flags' in html
+    assert 'Pedigree conflicts' in html
 
 
 def test_resolved_section_is_absent_when_there_is_nothing_resolved():
@@ -330,3 +334,33 @@ def test_inline_flag_lines_are_capped_with_a_more_link():
     assert '+3 more &mdash; click to expand' in html
     # Every flag still reaches the page, just via the expanded detail table.
     assert html.count('full siblings') > INLINE_FLAG_LIMIT
+
+
+def test_split_by_impact_separates_conflicts_from_refinements():
+    _, active, _, _ = run_pipeline()
+
+    conflicts, refinements = split_by_impact(active, {info.sg_id: info for g in active for info in g.sg_infos})
+
+    # FAM08's only flag is siblings -> full siblings, so it appears solely in the refinements side.
+    assert 'FAM08' not in group_by_label(conflicts)
+    assert 'FAM08' in group_by_label(refinements)
+    assert all(f.impact == 'conflict' for g in conflicts for f in g.flags)
+    assert all(f.impact == 'refinement' for g in refinements for f in g.flags)
+
+
+def test_refinements_render_in_their_own_section_with_the_explanation():
+    html = render_fixture_html()
+
+    assert 'Pedigree refinements' in html
+    assert 'Pedigree conflicts' in html
+    # The section explains the one-parent-on-file cause, which is why these rows exist at all.
+    assert 'only one parent is in the database' in html
+
+
+def test_a_dataset_of_only_refinements_still_shows_the_all_clear():
+    # No conflicts means nothing needs a decision, even though flags exist.
+    only_refinement = [{'id': 'CPG012', 'meta': MOCK_SEQUENCING_GROUPS[11]['meta']}]
+    html = render_fixture_html(only_refinement)
+
+    assert 'All clear' in html
+    assert 'Pedigree refinements' in html

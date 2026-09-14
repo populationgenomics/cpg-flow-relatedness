@@ -124,6 +124,12 @@ MOCK_FLAGS_BY_SG: dict[str, list[dict]] = {
     'CPG009': [
         self_relatedness_flag('CPG009', 'CPG011', participant='PID_G', relatedness=0.4218, ibs0=3902, ibs2=11244),
     ],
+    # FAM08: a refinement, not a conflict. Only the mother is on file, so the expected pedigree can
+    # only say 'siblings' while the genotypes say 'full siblings'. Belongs in the de-emphasised
+    # section. This is the single most common flag on real datasets.
+    'CPG012': [
+        pedigree_flag('CPG012', 'CPG013', 'FAM08', expected='siblings', inferred='full siblings', relatedness=0.4873),
+    ],
 }
 
 _SG_IDENTITIES = [
@@ -139,6 +145,8 @@ _SG_IDENTITIES = [
     ('CPG009', 'EXT_G1', 'PID_G', '', 'blood'),
     ('CPG010', 'EXT_H', 'PID_H', 'FAM07', 'blood'),
     ('CPG011', 'EXT_G2', 'PID_G', '', 'saliva'),
+    ('CPG012', 'EXT_K', 'PID_K', 'FAM08', 'blood'),
+    ('CPG013', 'EXT_L', 'PID_L', 'FAM08', 'blood'),
 ]
 
 MOCK_SG_INFOS: dict[str, SGInfo] = {

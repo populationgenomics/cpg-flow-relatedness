@@ -168,6 +168,54 @@ class SomalierRelatednessFlag(SomalierFlag):
     ibs2: int
 
 
+# peddy's Ped.relation() vocabulary. Pinned here because the pedigree check classifies flags by
+# comparing these exact strings, so an upstream rename would silently reclassify everything.
+PEDDY_RELATIONSHIPS = frozenset(
+    {
+        'cousins',
+        'full siblings',
+        'grandchild',
+        'mom-dad',
+        'niece/nephew',
+        'parent-child',
+        'related at unknown level',
+        'siblings',
+        'unknown',
+        'unrelated',
+    }
+)
+
+# What peddy reports when the pedigree puts a pair in the same family but records no path between
+# them. Note it is not the string 'unknown', which is what our own code falls back to when a sample
+# is missing from the PED entirely.
+UNSPECIFIED_RELATED = 'related at unknown level'
+
+
+def is_pedigree_refinement(expected: str, inferred: str) -> bool:
+    """
+    True when the inferred relationship fills a blank in the recorded pedigree rather than
+    contradicting it.
+
+    These are pedigree *incompleteness*, not pedigree errors, and they dominate real datasets:
+    92 of perth-neuro's 163 pedigree flags are refinements. Two patterns qualify.
+
+    The pedigree places the pair in a family but records no path between them, and the genotypes
+    name a specific relationship.
+
+    Or the pedigree says 'siblings' and the genotypes say 'full siblings'. peddy reports
+    'siblings' when only one shared parent is recorded, so this is what you get whenever only the
+    mother is in the database: the pair really are full siblings, but the expected pedigree cannot
+    know that while the paternal column is empty. This is the single most common flag in practice
+    and carries no signal.
+
+    The reverse direction stays a conflict. If the pedigree made a specific claim and the genotypes
+    could not confirm it, someone should look.
+    """
+    if expected == UNSPECIFIED_RELATED:
+        return inferred != 'unrelated'
+    return expected == 'siblings' and inferred == 'full siblings'
+
+
 def convert_to_web_url(dataset_name: str, html_path: Path | str) -> str:
     """
     Convert a gs:// web-bucket path to the http(s) web URL.

@@ -19,11 +19,19 @@ import pandas as pd
 from loguru import logger
 from peddy import Ped, Sample
 
-from rd_qc.utils import SomalierFlag, SomalierRelatednessFlag, SomalierSexInferenceFlag
+from rd_qc.utils import SomalierFlag, SomalierRelatednessFlag, SomalierSexInferenceFlag, is_pedigree_refinement
 
 from cpg_flow.metamist import get_metamist
 from cpg_utils import config, slack, to_path
 from cpg_utils.metamist_registration import create_new
+
+# Below this, an inferred relationship between a pair the pedigree calls unrelated is too weak to
+# be worth reporting as a finding.
+UNRELATED_TO_RELATED_MIN_RELATEDNESS = 0.1
+
+# Reporting buckets, most serious first.
+MISMATCH_BUCKETS = ('related_to_unrelated', 'unrelated_to_related', 'refinement')
+
 
 _messages: list[str] = []
 
@@ -123,10 +131,37 @@ def _check_sex(samples_df: pd.DataFrame) -> dict[str, SomalierSexInferenceFlag]:
     return sex_mismatches_by_sgid
 
 
+def _mismatch_bucket(expected_rel: str, inferred_rel: str, relatedness: float) -> str:
+    """
+    Which reporting bucket a pedigree mismatch belongs in.
+
+    Refinements are classified first, because a refinement is neither of the other two. This used
+    to test `expected_rel == 'unknown'`, which peddy never returns for an unspecified relationship
+    (it returns 'related at unknown level'), so every refinement fell through to
+    related_to_unrelated and was reported as the most serious kind of finding. On perth-neuro that
+    miscategorised 92 of 163 flags.
+    """
+    if is_pedigree_refinement(expected_rel, inferred_rel):
+        return 'refinement'
+    if expected_rel in ('unknown', 'unrelated') and inferred_rel != 'unrelated':
+        if relatedness > UNRELATED_TO_RELATED_MIN_RELATEDNESS:
+            return 'unrelated_to_related'
+        return 'ignored'
+    return 'related_to_unrelated'
+
+
 def _report_relatedness_findings(
     unrelated_to_related: list[str],
     related_to_unrelated: list[str],
+    refinements: list[str],
 ) -> None:
+    if related_to_unrelated:
+        info(
+            f'❗ Found {len(related_to_unrelated)} sample pair(s) '
+            f'that are provided as related, but inferred as unrelated:',
+        )
+        for i, pair in enumerate(related_to_unrelated):
+            info(f' {i + 1}. {pair}')
     if unrelated_to_related:
         info(
             f'⚠️ Found {len(unrelated_to_related)} '
@@ -135,13 +170,13 @@ def _report_relatedness_findings(
         )
         for i, pair in enumerate(unrelated_to_related):
             info(f' {i + 1}. {pair}')
-    if related_to_unrelated:
+    if refinements:
+        # Counted but not listed: these are routinely the bulk of the flags and listing them
+        # drowns the two buckets above, which are the ones that need a decision.
         info(
-            f'❗ Found {len(related_to_unrelated)} sample pair(s) '
-            f'that are provided as related, but inferred as unrelated:',
+            f'ℹ️ {len(refinements)} pair(s) where the inferred relationship is more specific than '  # noqa: RUF001
+            f'the recorded pedigree (usually only one parent on file). See the flags report.',
         )
-        for i, pair in enumerate(related_to_unrelated):
-            info(f' {i + 1}. {pair}')
     if not unrelated_to_related and not related_to_unrelated:
         info('✅ Inferred pedigree matches for all provided related pairs.')
     info('')
@@ -157,8 +192,7 @@ def _check_relatedness(
     expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
     inferred_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in inferred_ped.samples()}
 
-    mismatching_unrelated_to_related = []
-    mismatching_related_to_unrelated = []
+    buckets: dict[str, list[str]] = {key: [] for key in (*MISMATCH_BUCKETS, 'ignored')}
 
     relatedness_flags_by_sg_id: dict[str, list[SomalierRelatednessFlag]] = {}
     for idx, row in pairs_df.iterrows():
@@ -210,18 +244,16 @@ def _check_relatedness(
                 ),
             )
 
-            if (expected_rel == 'unknown' and inferred_rel != 'unknown') or (
-                expected_rel == 'unrelated' and inferred_rel != 'unrelated'
-            ):
-                if row['relatedness'] > 0.1:  # noqa: PLR2004
-                    mismatching_unrelated_to_related.append(line)
-            else:
-                mismatching_related_to_unrelated.append(line)
+            buckets[_mismatch_bucket(expected_rel, inferred_rel, row['relatedness'])].append(line)
 
         pairs_df.loc[idx, 'provided_rel'] = expected_rel
         pairs_df.loc[idx, 'inferred_rel'] = inferred_rel
 
-    _report_relatedness_findings(mismatching_unrelated_to_related, mismatching_related_to_unrelated)
+    _report_relatedness_findings(
+        buckets['unrelated_to_related'],
+        buckets['related_to_unrelated'],
+        buckets['refinement'],
+    )
 
     return relatedness_flags_by_sg_id
 

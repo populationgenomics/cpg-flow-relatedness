@@ -103,9 +103,11 @@
         .reads-list .pair { padding: 1px 0; word-break: break-all; }
         .reads-list .r2 { color: #74838d; }
 
-        /* The resolved section is a settled backlog, so it is visually de-emphasised. */
-        .resolved-section table { opacity: 0.72; }
-        .resolved-section h2 { color: #636e72; }
+        /* Refinements and resolved flags are both de-emphasised: neither needs a decision. */
+        .refinement-section table, .resolved-section table { opacity: 0.72; }
+        .refinement-section h2, .resolved-section h2 { color: #636e72; }
+        .refinement-section .flag-line { border-left-color: #b2bec3; }
+        .refinement-section .blurb { margin: -4px 0 12px; }
     </style>
 </head>
 <body>
@@ -234,15 +236,19 @@
             <div class="sub"></div>
         </div>
         <div class="card">
-            <div class="label">Active flags</div>
-            <div class="value {{ 'red' if summary.active_flags else 'grey' }}">{{ summary.active_flags }}</div>
+            <div class="label">Conflicts</div>
+            <div class="value {{ 'red' if summary.active_conflicts else 'grey' }}">{{ summary.active_conflicts }}</div>
             <div class="sub">
                 {%- set parts = [] -%}
                 {%- if summary.active_by_category.sex %}{% set _ = parts.append(summary.active_by_category.sex ~ ' sex') %}{% endif -%}
                 {%- if summary.active_by_category.self %}{% set _ = parts.append(summary.active_by_category.self ~ ' self') %}{% endif -%}
-                {%- if summary.active_by_category.pedigree %}{% set _ = parts.append(summary.active_by_category.pedigree ~ ' pedigree') %}{% endif -%}
-                {{ parts | join(' &middot; ') if parts else 'none outstanding' }}
+                {{ parts | join(' &middot; ') ~ ' &middot; rest pedigree' if parts else 'need a decision' if summary.active_conflicts else 'none outstanding' }}
             </div>
+        </div>
+        <div class="card">
+            <div class="label">Refinements</div>
+            <div class="value grey">{{ summary.active_refinements }}</div>
+            <div class="sub">{{ 'pedigree detail only' if summary.active_refinements else '' }}</div>
         </div>
         <div class="card">
             <div class="label">Families affected</div>
@@ -257,10 +263,10 @@
     </div>
 
     {# ------------------------------------------------------------------ #}
-    {# Section 1: families with active flags (the headline)               #}
+    {# Section 1: conflicts, where pedigree and genotypes disagree        #}
     {# ------------------------------------------------------------------ #}
-    <h2>&#9888; Families with flags <span class="count">{{ active_groups | length }} group{{ '' if active_groups | length == 1 else 's' }}</span></h2>
-    {% if active_groups %}
+    <h2>&#9888; Pedigree conflicts <span class="count">{{ conflict_groups | length }} group{{ '' if conflict_groups | length == 1 else 's' }}</span></h2>
+    {% if conflict_groups %}
         {% if show_filter_bar %}
         <div class="filter-bar">
             <div class="filter-row">
@@ -277,14 +283,29 @@
         </div>
         {% endif %}
         <div id="active-rows">
-            {{ family_table(active_groups, is_resolved=False) }}
+            {{ family_table(conflict_groups, is_resolved=False) }}
         </div>
     {% else %}
-        <div class="all-clear">&#10003; All clear &mdash; no active flags{% if summary.resolved_flags %} ({{ summary.resolved_flags }} previously resolved){% endif %}.</div>
+        <div class="all-clear">&#10003; All clear &mdash; no pedigree conflicts{% if summary.active_refinements %} ({{ summary.active_refinements }} refinement{{ '' if summary.active_refinements == 1 else 's' }} below){% endif %}{% if summary.resolved_flags %}, {{ summary.resolved_flags }} previously resolved{% endif %}.</div>
     {% endif %}
 
     {# ------------------------------------------------------------------ #}
-    {# Section 2: resolved flags (past incidents backlog)                 #}
+    {# Section 2: refinements, where the pedigree is merely less specific #}
+    {# ------------------------------------------------------------------ #}
+    {% if refinement_groups %}
+    <div class="refinement-section">
+        <h2>&#8505; Pedigree refinements <span class="count">{{ refinement_groups | length }} group{{ '' if refinement_groups | length == 1 else 's' }}</span></h2>
+        <p class="blurb">These are not disagreements. The genotypes name a relationship that the recorded
+            pedigree leaves open, so they tell you the pedigree is incomplete rather than wrong. The most
+            common case by far is a pair recorded as <em>siblings</em> but inferred as <em>full siblings</em>,
+            which is what you get whenever only one parent is in the database: they really are full siblings,
+            but the pedigree cannot know that with the other parent's column empty.</p>
+        {{ family_table(refinement_groups, is_resolved=False) }}
+    </div>
+    {% endif %}
+
+    {# ------------------------------------------------------------------ #}
+    {# Section 3: resolved flags (past incidents backlog)                 #}
     {# ------------------------------------------------------------------ #}
     {% if resolved_groups %}
     <div class="resolved-section">

@@ -112,6 +112,10 @@ def run(
             flags_by_sg_id={},
             output_json=output_json,
         )
+        # Maybe we should write the analysis for the first pass anyway, and then for subsequent reruns
+        # if nothing changes (i.e. still no flags) THEN do nothing, i.e. don't update the existing
+        # analysis record. This will let us have analysis records for each self-relatedness run, even
+        # if there are no issues flagged, it's still valid to keep the analysis record.
         return
 
     flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]] = {}
@@ -131,6 +135,8 @@ def run(
         )
 
         # Only necessary to register the flag for the first SG in each pair
+        # TODO: Maybe we should double count, and then de-duplicate once actually rendering the report
+        # Could do this with a unique "sg_id_1-sg_id_2" key to avoid double counting
         if s1 not in flags_by_sg_id:
             flags_by_sg_id[s1] = []
         flags_by_sg_id[s1].append(
