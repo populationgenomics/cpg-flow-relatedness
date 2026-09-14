@@ -226,30 +226,27 @@ def _check_relatedness(
     return relatedness_flags_by_sg_id
 
 
-def run(
-    dataset: str,
-    title: str,
-    sg_ids: list[str],
-    expected_ped: str,
-    somalier_pairs: str,
+def produce_flags(
     somalier_samples: str,
-    output_pairs: str,
-    output_samples: str,
-    output_html: str,
-    base_output_html: str,
-    html_url: str,
-    output_json: str,
-):
-    """Report pedigree inconsistencies, given somalier outputs."""
+    somalier_pairs: str,
+    expected_ped_path: str,
+) -> tuple[dict[str, list[SomalierFlag]], pd.DataFrame, pd.DataFrame]:
+    """
+    Read the somalier relate outputs and produce every flag they imply, keyed by SG id.
 
-    dataset = get_metamist().get_metamist_proj(dataset)
+    This is the whole flag-producing half of the pedigree check, and it touches neither Metamist
+    nor Slack. It is separated out so the same flags can be regenerated locally from downloaded
+    somalier outputs without registering an analysis or posting to a channel, which is what
+    testing_scripts/local_pedigree_report.py does.
 
+    Returns the flags plus both dataframes, which `run` needs for its logging.
+    """
     logger.info(somalier_samples)
     samples_df = pd.read_csv(somalier_samples, delimiter='\t')
     pairs_df = pd.read_csv(somalier_pairs, delimiter='\t')
     with to_path(somalier_samples).open() as f:
         inferred_ped = Ped(f)
-    with to_path(expected_ped).open() as f:
+    with to_path(expected_ped_path).open() as f:
         expected_ped = Ped(f)
 
     bad = samples_df.gt_depth_mean == 0.0
@@ -270,6 +267,39 @@ def run(
         bad_ids,
     )
 
+    all_flags_by_sg_id: dict[str, list[SomalierFlag]] = {}
+    for sg_id, flag in sex_mismatches_by_sgid.items():
+        all_flags_by_sg_id[sg_id] = [flag]
+    for sg_id, flags in relatedness_flags_by_sg_id.items():
+        all_flags_by_sg_id.setdefault(sg_id, []).extend(flags)
+
+    return all_flags_by_sg_id, samples_df, pairs_df
+
+
+def run(
+    dataset: str,
+    title: str,
+    sg_ids: list[str],
+    expected_ped: str,
+    somalier_pairs: str,
+    somalier_samples: str,
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
+    base_output_html: str,
+    html_url: str,
+    output_json: str,
+):
+    """Report pedigree inconsistencies, given somalier outputs."""
+
+    dataset = get_metamist().get_metamist_proj(dataset)
+
+    all_flags_by_sg_id, samples_df, pairs_df = produce_flags(
+        somalier_samples=somalier_samples,
+        somalier_pairs=somalier_pairs,
+        expected_ped_path=expected_ped,
+    )
+
     print_contents(
         samples_df,
         pairs_df,
@@ -285,14 +315,6 @@ def run(
 
     if config.config_retrieve(['somalier_pedigree', 'send_to_slack'], default=True):
         slack.send_message(text)
-
-    all_flags_by_sg_id: dict[str, list[SomalierFlag]] = {}
-    for sg_id, flag in sex_mismatches_by_sgid.items():
-        all_flags_by_sg_id[sg_id] = [flag]
-    for sg_id, flags in relatedness_flags_by_sg_id.items():
-        if sg_id not in all_flags_by_sg_id:
-            all_flags_by_sg_id[sg_id] = []
-        all_flags_by_sg_id[sg_id].extend(flags)
 
     result: dict[str, Any] = {
         'dataset': dataset,

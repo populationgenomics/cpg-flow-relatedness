@@ -118,7 +118,7 @@ def reconcile_sg_somalier_sex_inference_flags(
     stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
     sg_id = sg['id']
     report = 'Somalier sex inference'
-    logger.info(f'{sg_id} :: Found {len(current_somalier_flags)} existing {report} flags. Reconciling.')
+    logger.info(f'{sg_id} :: Found {len(existing_flags_by_key)} existing {report} flags. Reconciling.')
     for flag_key, flag in existing_flags_by_key.items():
         if flag_key not in new_somalier_sex_inference_flags_by_key:
             if not flag['resolved']:
@@ -182,7 +182,7 @@ def reconcile_sg_somalier_self_relatedness_flags(
     stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
     sg_id = sg['id']
     report = 'Somalier self relatedness'
-    logger.info(f'{sg_id} :: Found {len(current_somalier_flags)} existing {report} flags. Reconciling.')
+    logger.info(f'{sg_id} :: Found {len(existing_flags_by_key)} existing {report} flags. Reconciling.')
     for flag_key, flag in existing_flags_by_key.items():
         if flag_key not in new_somalier_self_relatedness_flags_by_key:
             if not flag['resolved']:

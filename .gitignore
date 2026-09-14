@@ -171,3 +171,7 @@ cython_debug/
 .pypirc
 # Added by code-review-graph
 .code-review-graph/
+
+# Somalier outputs pulled from GCS for local report runs. Real participant external IDs, so
+# these must never be committed. See testing_scripts/local_pedigree_report.py.
+local_data/

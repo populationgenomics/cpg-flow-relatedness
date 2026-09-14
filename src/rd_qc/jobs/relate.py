@@ -49,7 +49,9 @@ def self_relatedness_jobs(
     batch_instance.write_output(relate_j.output, outputs[f'{participant_id}_prefix'])
     batch_instance.write_output(relate_j.html_out, outputs[f'{participant_id}_html'])
 
-    sg_ids_str = ','.join(sorted(somalier_paths.keys()))
+    # Space-joined, not comma-joined: check_self_relatedness's --sg-ids uses nargs='+', so a comma
+    # separated string arrives as one bogus ID and gets passed straight to create_new(sgs=...).
+    sg_ids_str = ' '.join(sorted(somalier_paths.keys()))
 
     check_j = batch_instance.new_bash_job(
         f'Somalier identity alert {participant_id}',
