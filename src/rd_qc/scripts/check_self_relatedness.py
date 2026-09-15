@@ -236,6 +236,7 @@ def run(
 
     low_relatedness_pairs = read_low_relatedness_pairs(somalier_pairs, relatedness_threshold)
     if low_relatedness_pairs is None:
+        # If the pairs file does not exist or cannot be read, exit early
         return
 
     # Write the files out
