@@ -428,20 +428,16 @@ def select_somalier_extract_targets(project: str, sgids: tuple[str, ...]) -> tup
 
     return targets, sg_id_map
 
+
 @cache
-def get_somalier_relate_analyses(project: str) -> dict[str, list[dict]]:
+def get_somalier_relate_analyses(project: str) -> list[dict]:
     """
     Retrieve all somalier relate analyses for the given project.
     """
     resolved = get_metamist().get_metamist_proj(project)
     response = query(SOMALIER_RELATE_ANALYSES_QUERY, variables={'project': resolved})
-    analyses_by_sg: dict[str, list[dict]] = {}
-    for analysis in response['project']['analyses']:
-        sgs = analysis['sequencingGroups']
-        for sg in sgs:
-            sg_id = sg['id']
-            analyses_by_sg.setdefault(sg_id, []).append(analysis)
-    return analyses_by_sg
+    return response['project']['analyses']
+
 
 @cache
 def get_project_pedigree(project: str) -> list[dict]:

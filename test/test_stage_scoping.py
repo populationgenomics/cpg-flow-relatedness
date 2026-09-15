@@ -24,7 +24,12 @@ _PROJECT = 'my-dataset'
 # participants with no cohort representation at all - these are what the old scoping dropped.
 _INDEX_ENTRIES = [
     SgSomalierInfo(sg_id='CPG01', participant_id=1, participant_external_id='PART_A', somalier_path=None),
-    SgSomalierInfo(sg_id='CPG02', participant_id=1, participant_external_id='PART_A', somalier_path='gs://bucket/CPG02.cram.somalier'),
+    SgSomalierInfo(
+        sg_id='CPG02',
+        participant_id=1,
+        participant_external_id='PART_A',
+        somalier_path='gs://bucket/CPG02.cram.somalier',
+    ),
     SgSomalierInfo(sg_id='CPG03', participant_id=2, participant_external_id='PART_B', somalier_path=None),
     SgSomalierInfo(sg_id='CPG04', participant_id=3, participant_external_id='PART_C', somalier_path=None),
 ]

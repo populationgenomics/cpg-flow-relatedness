@@ -237,7 +237,7 @@ def _fmt_num(value: object) -> str:
     if isinstance(value, (bool, str)):
         return str(value)
     try:
-        num = float(value)
+        num = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return str(value)
     if num.is_integer():
@@ -378,7 +378,7 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
         meta = sg.get('meta') or {}
         flags: list[SomalierFlag] = []
         for raw in meta.get('somalier_flags') or []:
-            category = (raw or {}).get('category')
+            category = (raw or {}).get('category') or ''
             flag_class = FLAG_CLASSES.get(category)
             if flag_class is None:
                 logger.warning(f'{sg["id"]} :: skipping Somalier flag with unrecognised category {category!r}')
@@ -389,6 +389,13 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
                 logger.warning(f'{sg["id"]} :: skipping malformed {category} flag: {exc}')
         collected.append(SgFlags(sg_id=sg['id'], flags=tuple(flags)))
     return collected
+
+
+def category_key_of(flag: SomalierFlag, default: str = '') -> str:
+    """The short filter key for a flag's category, falling back to `default` for anything else."""
+    if not flag.category:
+        return default
+    return CATEGORY_KEYS.get(flag.category, default)
 
 
 def flag_sg_key(flag: SomalierFlag, owning_sg_id: str) -> str:
@@ -416,12 +423,12 @@ def flag_identity(flag: SomalierFlag, sg_key: str) -> tuple:
     resolved/unresolved lifecycle agree on what counts as the same flag. Measured values drift
     between relate runs, so they are excluded here as they are there.
     """
-    category_key = CATEGORY_KEYS.get(flag.category, flag.category or '')
-    if category_key == 'sex':
+    category_key = category_key_of(flag, flag.category or '')
+    if isinstance(flag, SomalierSexInferenceFlag):
         return (category_key, sg_key, flag.provided, flag.inferred)
-    if category_key == 'self':
+    if isinstance(flag, SomalierSelfRelatednessFlag):
         return (category_key, sg_key, flag.participant_external_id, flag.threshold)
-    if category_key == 'pedigree':
+    if isinstance(flag, SomalierRelatednessFlag):
         return (category_key, sg_key, flag.expected_relationship, flag.inferred_relationship)
     return (category_key, sg_key)
 
@@ -483,13 +490,12 @@ def _group_targets(flag: SomalierFlag, owning_sg_id: str, infos: dict[str, SGInf
     Two only for a pedigree pair whose members resolve to different families, which is the
     cross-family sample-swap case.
     """
-    category_key = CATEGORY_KEYS.get(flag.category)
-    if category_key == 'pedigree':
+    if isinstance(flag, SomalierRelatednessFlag):
         recorded = flag.family_external_id or ''
         first = _pedigree_family_group(flag.sg_id_1, infos, recorded)
         second = _pedigree_family_group(flag.sg_id_2, infos, recorded)
         return [first] if first[0] == second[0] else [first, second]
-    if category_key == 'self':
+    if isinstance(flag, SomalierSelfRelatednessFlag):
         return [_family_group(flag.sg_id_1, infos, fallback_participant=flag.participant_external_id)]
     return [_family_group(owning_sg_id, infos)]
 
@@ -588,13 +594,16 @@ def _flag_to_row(
     cross_family: str | None = None,
 ) -> FlagRow:
     """Flatten one flag into a display-ready row, branching on category for labels and result text."""
-    category_key = CATEGORY_KEYS.get(flag.category, flag.category or 'unknown')
-    if category_key == 'sex':
+    category_key = category_key_of(flag, flag.category or 'unknown')
+    if isinstance(flag, SomalierSexInferenceFlag):
         parts = _sex_row_parts(flag, owning_sg_id, infos)
-    elif category_key == 'self':
+    elif isinstance(flag, SomalierSelfRelatednessFlag):
         parts = _self_row_parts(flag, infos)
-    else:
+    elif isinstance(flag, SomalierRelatednessFlag):
         parts = _pedigree_row_parts(flag, infos)
+    else:
+        # Unreachable via collect_somalier_flags, which only builds the three FLAG_CLASSES.
+        raise TypeError(f'Cannot render flag of type {type(flag).__name__} (category {flag.category!r})')
 
     date_short, date_full = _date_parts(flag.date)
     resolution_short, resolution_full = _date_parts(flag.resolution_date)
@@ -604,7 +613,7 @@ def _flag_to_row(
     # sex mismatch or a failed self-relatedness check is always a genuine disagreement. Flags
     # recorded before `verdict` existed have an empty string, and fall back to conflict so nothing
     # old is silently de-emphasised.
-    refinement = category_key == 'pedigree' and flag.verdict == VERDICT_REFINEMENT
+    refinement = isinstance(flag, SomalierRelatednessFlag) and flag.verdict == VERDICT_REFINEMENT
 
     return FlagRow(
         category=flag.category or '',
@@ -765,11 +774,9 @@ def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: 
 
     all_flags = list(unique.values())
     active = [f for f in all_flags if not f.resolved]
-    active_by_category = {key: sum(1 for f in active if CATEGORY_KEYS.get(f.category) == key) for key in CATEGORY_ORDER}
+    active_by_category = {key: sum(1 for f in active if category_key_of(f) == key) for key in CATEGORY_ORDER}
 
-    refinements = sum(
-        1 for f in active if CATEGORY_KEYS.get(f.category) == 'pedigree' and f.verdict == VERDICT_REFINEMENT
-    )
+    refinements = sum(1 for f in active if isinstance(f, SomalierRelatednessFlag) and f.verdict == VERDICT_REFINEMENT)
 
     return {
         'total_sgs': total_sgs,

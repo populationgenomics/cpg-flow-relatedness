@@ -64,7 +64,7 @@ from rd_qc.scripts.somalier_flags_report import (  # noqa: E402
     split_active_resolved,
     summarise_flags,
 )
-from rd_qc.utils import build_ped_content, get_project_sgs_and_fingerprints  # noqa: E402
+from rd_qc.utils import SomalierFlag, build_ped_content, get_project_sgs_and_fingerprints  # noqa: E402
 
 from cpg_utils.config import set_config_paths  # noqa: E402
 from metamist.graphql import gql, query  # noqa: E402
@@ -207,7 +207,7 @@ def usable_existing_flags(sg_id: str, current: list[dict]) -> list[dict]:
     """Drop any existing meta flag that no longer fits its dataclass, rather than crashing on it."""
     keep = []
     for flag in current:
-        flag_class = FLAG_CLASSES.get((flag or {}).get('category'))
+        flag_class = FLAG_CLASSES.get((flag or {}).get('category') or '')
         if flag_class is None:
             logger.warning(f'{sg_id} :: ignoring existing flag with unrecognised category')
             continue
@@ -220,7 +220,7 @@ def usable_existing_flags(sg_id: str, current: list[dict]) -> list[dict]:
     return keep
 
 
-def reconcile_locally(sg: dict, new_flags: list[dict], today: str) -> list:
+def reconcile_locally(sg: dict, new_flags: list[dict], today: str) -> list[SomalierFlag]:
     """
     Reconcile fresh flags against whatever is already in the SG's meta, entirely in memory.
 
@@ -234,9 +234,7 @@ def reconcile_locally(sg: dict, new_flags: list[dict], today: str) -> list:
     for flag in (*current, *new_flags):
         flag['sequencing_group_key'] = sequencing_group_key(flag, sg_id)
 
-    new_sex = {
-        (f['provided'], f['inferred']): f for f in new_flags if f['category'] == 'sex_inference_mismatch'
-    }
+    new_sex = {(f['provided'], f['inferred']): f for f in new_flags if f['category'] == 'sex_inference_mismatch'}
     new_pedigree = {
         (
             f['sg_id_1'],
@@ -249,7 +247,7 @@ def reconcile_locally(sg: dict, new_flags: list[dict], today: str) -> list:
         if f['category'] == 'relatedness_mismatch'
     }
 
-    final = []
+    final: list[SomalierFlag] = []
     _, sex_final = reconcile_sg_somalier_sex_inference_flags(sg, new_sex, current, today)
     final.extend(sex_final)
     _, pedigree_final = reconcile_sg_somalier_relatedness_flags(sg, new_pedigree, current, today)

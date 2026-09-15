@@ -165,10 +165,7 @@ def test_pairwise_flags_are_recorded_against_the_first_sg_of_the_pair_only(tmp_p
     flags, _, _ = produce_flags(**broken_trio(tmp_path))
 
     owners = {
-        (f.sg_id_1, f.sg_id_2): sg_id
-        for sg_id, fs in flags.items()
-        for f in fs
-        if f.category == 'relatedness_mismatch'
+        (f.sg_id_1, f.sg_id_2): sg_id for sg_id, fs in flags.items() for f in fs if f.category == 'relatedness_mismatch'
     }
 
     # This is the convention the report's dedup relies on: the lexicographically first SG owns it.
@@ -236,10 +233,7 @@ def test_same_family_pairs_with_no_recorded_link_are_not_expected_unrelated(tmp_
         ],
         # The expected pedigree knows only that all four are in FAM1, with no links at all.
         ped=(
-            'FAM1\tCPG001\t0\t0\t1\t1\n'
-            'FAM1\tCPG002\t0\t0\t2\t1\n'
-            'FAM1\tCPG004\t0\t0\t1\t1\n'
-            'FAM1\tCPG005\t0\t0\t2\t1\n'
+            'FAM1\tCPG001\t0\t0\t1\t1\nFAM1\tCPG002\t0\t0\t2\t1\nFAM1\tCPG004\t0\t0\t1\t1\nFAM1\tCPG005\t0\t0\t2\t1\n'
         ),
     )
 
@@ -269,16 +263,11 @@ def test_cross_family_pairs_keep_expected_unrelated(tmp_path):
         ],
         pair_rows=[pair_row('CPG001', 'CPG002', relatedness=0.47)],
         ped=(
-            'FAM1\tCPG001\t0\t0\t1\t1\n'
-            'FAM2\tCPG002\t0\t0\t2\t1\n'
-            'FAM1\tCPG004\t0\t0\t1\t1\n'
-            'FAM1\tCPG005\t0\t0\t2\t1\n'
+            'FAM1\tCPG001\t0\t0\t1\t1\nFAM2\tCPG002\t0\t0\t2\t1\nFAM1\tCPG004\t0\t0\t1\t1\nFAM1\tCPG005\t0\t0\t2\t1\n'
         ),
     )
 
     flags, _, _ = produce_flags(**inputs)
     pedigree = [f for fs in flags.values() for f in fs if f.category == 'relatedness_mismatch']
 
-    assert [(f.expected_relationship, f.inferred_relationship) for f in pedigree] == [
-        ('unrelated', 'siblings')
-    ]
+    assert [(f.expected_relationship, f.inferred_relationship) for f in pedigree] == [('unrelated', 'siblings')]

@@ -73,6 +73,140 @@ def register_analysis(
     )
 
 
+def read_low_relatedness_pairs(somalier_pairs: str, relatedness_threshold: float) -> list[dict[str, Any]] | None:
+    """
+    The pairs in somalier's output that fall below the threshold, or None if the file is missing.
+    """
+    pairs: list[dict[str, Any]] = []
+    try:
+        with open(somalier_pairs) as f:
+            for row in csv.DictReader(f, delimiter='\t'):
+                relatedness = float(row['relatedness'])
+                if relatedness < relatedness_threshold:
+                    pairs.append(
+                        {
+                            'sample_a': row['#sample_a'],
+                            'sample_b': row['sample_b'],
+                            'relatedness': relatedness,
+                            'ibs0': row['ibs0'],
+                            'ibs2': row['ibs2'],
+                        },
+                    )
+    except FileNotFoundError:
+        logger.warning(f'Pairs file not found: {somalier_pairs} — skipping')
+        return None
+    return pairs
+
+
+def find_existing_analysis(
+    analyses: list[dict],
+    participant_id: int,
+    participant_external_id: str,
+) -> dict | None:
+    """
+    This participant's existing somalier_relate analysis, if one is recorded.
+
+    Older records key the participant on the internal integer ID, newer ones on the external ID
+    under either key, so all three spellings are accepted.
+    """
+    for analysis in analyses:
+        meta = analysis['meta']
+        if (
+            meta.get('participant_id') in (participant_id, participant_external_id)
+            or meta.get('participant_external_id') == participant_external_id
+        ):
+            return analysis
+    return None
+
+
+def register_passing_analysis(
+    dataset: str,
+    participant_id: int,
+    participant_external_id: str,
+    sg_ids: list[str],
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
+    output_json: str,
+):
+    """
+    Register a passing analysis for this participant unless one is already recorded.
+
+    An existing flagged analysis is warned about rather than updated.
+    TODO: updating it would mean checking the recorded SG IDs still match the passing set.
+    """
+    existing = find_existing_analysis(
+        get_somalier_relate_analyses(dataset),
+        participant_id,
+        participant_external_id,
+    )
+    if existing is None:
+        logger.info(f'No existing analysis found for participant {participant_external_id}')
+        register_analysis(
+            dataset=dataset,
+            participant_id=participant_id,
+            participant_external_id=participant_external_id,
+            sg_ids=sg_ids,
+            output_pairs=output_pairs,
+            output_samples=output_samples,
+            output_html=output_html,
+            output_json=output_json,
+            flagged=False,
+        )
+        return
+
+    logger.info(f'Found existing analysis {existing["id"]} for participant {participant_external_id}')
+    if existing['meta'].get('flagged', False):
+        logger.warning(
+            f'Existing analysis {existing["id"]} for participant {participant_external_id} is flagged, but the '
+            'current check passed. Consider updating the analysis record.'
+        )
+
+
+def build_alert_and_flags(
+    dataset: str,
+    participant_external_id: str,
+    relatedness_threshold: float,
+    html_url: str,
+    low_relatedness_pairs: list[dict[str, Any]],
+) -> tuple[str, dict[str, list[SomalierSelfRelatednessFlag]]]:
+    """
+    The Slack alert text and the flags to record, one per failing pair.
+
+    Each pair's samples are sorted so the same pair always reads the same way, and the flag is
+    recorded against the first of the two only.
+    TODO: record against both and de-duplicate on an "sg_id_1-sg_id_2" key when rendering instead.
+    """
+    header = f'Self-relatedness check failed for participant {participant_external_id}'
+    if html_url:
+        header = f'<{html_url}|{header}>'
+    lines = [
+        f'*[{dataset}]* {header}',
+        f'Expected relatedness ~1.0 (threshold: {relatedness_threshold}), found:',
+    ]
+
+    flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]] = {}
+    for pair in low_relatedness_pairs:
+        s1, s2 = sorted([pair['sample_a'], pair['sample_b']])
+        lines.append(
+            f'  {s1} - {s2}: relatedness={pair["relatedness"]}, ibs0={pair["ibs0"]}, ibs2={pair["ibs2"]}',
+        )
+        flags_by_sg_id.setdefault(s1, []).append(
+            SomalierSelfRelatednessFlag(
+                category='self_relatedness_mismatch',
+                sg_id_1=s1,
+                sg_id_2=s2,
+                participant_external_id=participant_external_id,
+                threshold=relatedness_threshold,
+                relatedness=float(pair['relatedness']),
+                ibs0=int(pair['ibs0']),
+                ibs2=int(pair['ibs2']),
+            )
+        )
+
+    return '\n'.join(lines), flags_by_sg_id
+
+
 def run(
     dataset: str,
     participant_id: int,
@@ -100,25 +234,8 @@ def run(
     )
     logger.info(f'Relatedness threshold: {relatedness_threshold}')
 
-    low_relatedness_pairs: list[dict[str, Any]] = []
-
-    try:
-        with open(somalier_pairs) as f:
-            reader = csv.DictReader(f, delimiter='\t')
-            for row in reader:
-                relatedness = float(row['relatedness'])
-                if relatedness < relatedness_threshold:
-                    low_relatedness_pairs.append(
-                        {
-                            'sample_a': row['#sample_a'],
-                            'sample_b': row['sample_b'],
-                            'relatedness': relatedness,
-                            'ibs0': row['ibs0'],
-                            'ibs2': row['ibs2'],
-                        },
-                    )
-    except FileNotFoundError:
-        logger.warning(f'Pairs file not found: {somalier_pairs} — skipping')
+    low_relatedness_pairs = read_low_relatedness_pairs(somalier_pairs, relatedness_threshold)
+    if low_relatedness_pairs is None:
         return
 
     # Write the files out
@@ -127,10 +244,11 @@ def run(
     with to_path(output_pairs).open('w') as f:
         f.write(to_path(somalier_pairs).read_text())
 
-    passed = len(low_relatedness_pairs) == 0
-    if passed:
+    if not low_relatedness_pairs:
         # All pairs have relatedness above the threshold, exit early
-        logger.info(f'{participant_id} ({participant_external_id}): All pairs have relatedness >= {relatedness_threshold}')
+        logger.info(
+            f'{participant_id} ({participant_external_id}): All pairs have relatedness >= {relatedness_threshold}'
+        )
         write_result_json(
             dataset=dataset,
             participant_external_id=participant_external_id,
@@ -140,79 +258,25 @@ def run(
             flags_by_sg_id={},
             output_json=output_json,
         )
-        # Check for existing analyses for this participant and write a new analysis record if none exists
-        analyses = get_somalier_relate_analyses(dataset)
-        found = False
-        for analysis in analyses:
-            # Analysis might be keyed on the integer participant id or the string external ID
-            if analysis['meta'].get('participant_id') == participant_id \
-            or analysis['meta'].get('participant_id') == participant_external_id \
-            or analysis['meta'].get('participant_external_id') == participant_external_id:
-                found = True
-                analysis_id = analysis['id']
-                logger.info(f'Found existing analysis {analysis_id} for participant {participant_external_id}')
-                if not analysis['meta'].get('flagged', False):
-                    # Still passing the relatedness check, no need to flag
-                    pass
-                else:
-                    # The analysis is flagged, warn the user but continue
-                    logger.warning(
-                        f'Existing analysis analysis {analysis_id} for participant {participant_external_id} '
-                        f'is flagged, but the current check passed. Consider updating the analysis record.')
-                    # TODO: Consider whether to update the existing analysis record to reflect the new passing status
-                    # this will involve checking the SG IDs involved for consistency with the new passing status
-                    # For now, warning is the only action taken
-
-        if not found:
-            logger.info(f'No existing analysis found for participant {participant_external_id}')
-            register_analysis(
-                dataset=dataset,
-                participant_id=participant_id,
-                participant_external_id=participant_external_id,
-                sg_ids=sg_ids,
-                output_pairs=output_pairs,
-                output_samples=output_samples,
-                output_html=output_html,
-                output_json=output_json,
-                flagged=False,
-            )
+        register_passing_analysis(
+            dataset=dataset,
+            participant_id=participant_id,
+            participant_external_id=participant_external_id,
+            sg_ids=sg_ids,
+            output_pairs=output_pairs,
+            output_samples=output_samples,
+            output_html=output_html,
+            output_json=output_json,
+        )
         return
 
-    flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]] = {}
-
-    header = f'Self-relatedness check failed for participant {participant_external_id}'
-    if html_url:
-        header = f'<{html_url}|{header}>'
-    lines = [
-        f'*[{dataset}]* {header}',
-        f'Expected relatedness ~1.0 (threshold: {relatedness_threshold}), found:',
-    ]
-    for pair in low_relatedness_pairs:
-        # Sort the sample names in the pair so that the same pair is always reported in the same order
-        s1, s2 = sorted([pair['sample_a'], pair['sample_b']])
-        lines.append(
-            f'  {s1} - {s2}: relatedness={pair["relatedness"]}, ibs0={pair["ibs0"]}, ibs2={pair["ibs2"]}',
-        )
-
-        # Only necessary to register the flag for the first SG in each pair
-        # TODO: Maybe we should double count, and then de-duplicate once actually rendering the report
-        # Could do this with a unique "sg_id_1-sg_id_2" key to avoid double counting
-        if s1 not in flags_by_sg_id:
-            flags_by_sg_id[s1] = []
-        flags_by_sg_id[s1].append(
-            SomalierSelfRelatednessFlag(
-                category='self_relatedness_mismatch',
-                sg_id_1=s1,
-                sg_id_2=s2,
-                participant_external_id=participant_external_id,
-                threshold=relatedness_threshold,
-                relatedness=float(pair['relatedness']),
-                ibs0=int(pair['ibs0']),
-                ibs2=int(pair['ibs2']),
-            )
-        )
-
-    text = '\n'.join(lines)
+    text, flags_by_sg_id = build_alert_and_flags(
+        dataset=dataset,
+        participant_external_id=participant_external_id,
+        relatedness_threshold=relatedness_threshold,
+        html_url=html_url,
+        low_relatedness_pairs=low_relatedness_pairs,
+    )
     logger.warning(text)
 
     if config.config_retrieve(
