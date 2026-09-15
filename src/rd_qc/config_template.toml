@@ -12,6 +12,9 @@ send_to_slack = true
 [somalier_pedigree]
 send_to_slack = true
 
+[somalier_flags_report]
+send_to_slack = true
+
 [somalier_extract]
 # Priority order for source file selection when extracting fingerprints
 # Options: "gvcf", "cram"

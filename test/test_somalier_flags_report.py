@@ -28,6 +28,7 @@ from rd_qc.scripts.somalier_flags_report import (
     split_active_resolved,
     split_by_impact,
     summarise_flags,
+    summary_message_text,
 )
 from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
 
@@ -227,6 +228,8 @@ def test_summary_counts():
         'active_flags': 7,
         'active_by_category': {'sex': 2, 'self': 2, 'pedigree': 3},
         # Six of the seven are real disagreements; FAM08's siblings/full-siblings pair is not.
+        # That one is a pedigree flag, so pedigree drops to 2 once refinements come out.
+        'active_conflicts_by_category': {'sex': 2, 'self': 2, 'pedigree': 2},
         'active_conflicts': 6,
         'active_refinements': 1,
         'families_affected': len(active),
@@ -364,3 +367,153 @@ def test_a_dataset_of_only_refinements_still_shows_the_all_clear():
 
     assert 'All clear' in html
     assert 'Pedigree refinements' in html
+
+
+# ---------------------------------------------------------------------------
+# Slack summary message
+# ---------------------------------------------------------------------------
+FLAGS_URL = 'https://main-web.populationgenomics.org.au/mock/flags.html'
+SOMALIER_URL = 'https://main-web.populationgenomics.org.au/mock/somalier.html'
+
+
+def message_for(summary, previous_analysis=None) -> str:
+    return summary_message_text(
+        'mock-dataset',
+        flags_html_url=FLAGS_URL,
+        somalier_html_url=SOMALIER_URL,
+        seq_type='genome',
+        seq_tech='short-read',
+        summary=summary,
+        previous_analysis=previous_analysis,
+    )
+
+
+def previous_report(summary: dict, completed: str = '2026-08-20T03:00:00+00:00') -> dict:
+    return {'id': 99, 'timestampCompleted': completed, 'meta': {'summary': summary}}
+
+
+def test_message_leads_with_the_dataset_and_both_report_links():
+    _, _, _, summary = run_pipeline()
+
+    lines = message_for(summary).splitlines()
+
+    assert lines[0] == f'*[mock-dataset]* <{FLAGS_URL}|Somalier flags report (genome | short-read)>'
+    assert SOMALIER_URL in lines[1]
+
+
+def test_message_counts_conflicts_not_total_flags():
+    _, active, _, summary = run_pipeline()
+
+    text = message_for(summary)
+
+    # 7 active flags, but only 6 are conflicts. The headline must not claim 7.
+    assert '*6 active conflicts*' in text
+    assert f'{len(active)} families' in text
+    assert '7 active conflicts' not in text
+
+
+def test_message_breaks_conflicts_down_by_category():
+    _, _, _, summary = run_pipeline()
+
+    text = message_for(summary)
+
+    # The one refinement is a pedigree flag, so pedigree reads 2 here and not 3.
+    assert ' - Sex inference: 2' in text
+    assert ' - Self-relatedness: 2' in text
+    assert ' - Pedigree relatedness: 2' in text
+
+
+def test_message_reports_refinements_separately_from_conflicts():
+    _, _, _, summary = run_pipeline()
+
+    text = message_for(summary)
+
+    assert '1 pedigree refinement' in text
+    assert 'less specific' in text
+
+
+def test_message_is_an_all_clear_when_nothing_is_active():
+    _, _, _, summary = run_pipeline(MOCK_ALL_CLEAR_SEQUENCING_GROUPS)
+
+    text = message_for(summary)
+
+    assert '✅' in text
+    assert 'No active Somalier flags' in text
+    assert 'conflicts*' not in text
+
+
+def test_message_is_an_all_clear_when_only_refinements_are_active():
+    summary = {
+        'total_sgs': 20,
+        'active_flags': 3,
+        'active_by_category': {'sex': 0, 'self': 0, 'pedigree': 3},
+        'active_conflicts_by_category': {'sex': 0, 'self': 0, 'pedigree': 0},
+        'active_conflicts': 0,
+        'active_refinements': 3,
+        'families_affected': 2,
+        'resolved_flags': 0,
+    }
+
+    text = message_for(summary)
+
+    # Nothing needs a decision, but the refinements still get their line.
+    assert 'No conflicts' in text
+    assert '3 pedigree refinements' in text
+
+
+def test_message_says_nothing_about_changes_without_a_previous_report():
+    _, _, _, summary = run_pipeline()
+
+    text = message_for(summary)
+
+    assert 'since the last report' not in text
+
+
+def test_message_reports_what_is_new_since_the_previous_report():
+    _, _, _, summary = run_pipeline()
+    previous = previous_report(
+        {
+            'total_sgs': 11,
+            'active_conflicts': 4,
+            'active_refinements': 0,
+            'families_affected': summary['families_affected'] - 1,
+            'resolved_flags': 0,
+        }
+    )
+
+    text = message_for(summary, previous)
+
+    assert 'Changes since the last report on 2026-08-20' in text
+    assert '+2 new sequencing groups' in text
+    assert '+1 additional family flagged' in text
+    assert '+2 new conflicts' in text
+    assert '+1 new pedigree refinement' in text
+
+
+def test_message_reports_no_change_when_the_summary_is_identical():
+    _, _, _, summary = run_pipeline()
+
+    text = message_for(summary, previous_report(dict(summary)))
+
+    assert 'No change since the last report on 2026-08-20' in text
+    assert 'Changes since' not in text
+
+
+def test_message_reports_flags_that_have_been_fixed():
+    _, _, _, summary = run_pipeline()
+    previous = previous_report({**summary, 'active_conflicts': 9, 'resolved_flags': 0})
+
+    text = message_for(summary, previous)
+
+    assert '3 fewer conflicts' in text
+    assert f'{summary["resolved_flags"]} more flags resolved' in text
+
+
+def test_message_survives_a_previous_summary_from_before_the_conflict_split():
+    _, _, _, summary = run_pipeline()
+    # Reports registered before conflicts/refinements existed only carry these keys.
+    previous = previous_report({'total_sgs': 13, 'active_flags': 7, 'resolved_flags': 2})
+
+    text = message_for(summary, previous)
+
+    assert 'since the last report on 2026-08-20' in text

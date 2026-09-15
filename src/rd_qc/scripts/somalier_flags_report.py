@@ -32,6 +32,7 @@ from rd_qc.utils import (
 from cpg_utils import to_path
 from cpg_utils.config import config_retrieve, dataset_for_access_level
 from cpg_utils.metamist_registration import create_new
+from cpg_utils.slack import send_message
 from metamist.graphql import gql, query
 
 STAGE_NAME = 'GenerateSomalierFlagsReport'
@@ -760,6 +761,11 @@ def split_by_impact(
 # ---------------------------------------------------------------------------
 # Summary and filter chips
 # ---------------------------------------------------------------------------
+def _is_refinement(flag: SomalierFlag) -> bool:
+    """Whether a flag is a pedigree refinement rather than a genuine disagreement."""
+    return isinstance(flag, SomalierRelatednessFlag) and flag.verdict == VERDICT_REFINEMENT
+
+
 def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: int) -> dict:
     """
     Dataset-wide, flag-centric counts for the header cards.
@@ -774,16 +780,19 @@ def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: 
 
     all_flags = list(unique.values())
     active = [f for f in all_flags if not f.resolved]
-    active_by_category = {key: sum(1 for f in active if category_key_of(f) == key) for key in CATEGORY_ORDER}
-
-    refinements = sum(1 for f in active if isinstance(f, SomalierRelatednessFlag) and f.verdict == VERDICT_REFINEMENT)
+    conflicts = [f for f in active if not _is_refinement(f)]
 
     return {
         'total_sgs': total_sgs,
         'active_flags': len(active),
-        'active_by_category': active_by_category,
-        'active_conflicts': len(active) - refinements,
-        'active_refinements': refinements,
+        'active_by_category': {key: sum(1 for f in active if category_key_of(f) == key) for key in CATEGORY_ORDER},
+        # Conflicts broken out per category as well, since the Slack summary leads with conflicts
+        # and quoting the all-active breakdown beside that count would not add up.
+        'active_conflicts_by_category': {
+            key: sum(1 for f in conflicts if category_key_of(f) == key) for key in CATEGORY_ORDER
+        },
+        'active_conflicts': len(conflicts),
+        'active_refinements': len(active) - len(conflicts),
         'families_affected': families_affected,
         'resolved_flags': sum(1 for f in all_flags if f.resolved),
     }
@@ -837,6 +846,97 @@ def render_report(
     )
 
 
+def _plural(count: int, noun: str, plural: str | None = None) -> str:
+    """'1 family' / '2 families', with an explicit plural for the irregular cases."""
+    return f'{count} {noun}' if count == 1 else f'{count} {plural or noun + "s"}'
+
+
+def _headline_lines(summary: dict) -> list[str]:
+    """The conflict count and its per-category breakdown, or an all-clear."""
+    conflicts = summary['active_conflicts']
+    if not summary['active_flags']:
+        return [f'✅ No active Somalier flags across {_plural(summary["total_sgs"], "sequencing group")}']
+    if not conflicts:
+        # Refinements only, so nothing needs a decision. The refinements line still follows.
+        return [f'✅ No conflicts across {_plural(summary["total_sgs"], "sequencing group")}']
+
+    families = _plural(summary['families_affected'], 'family', 'families')
+    lines = [f'🚩 *{_plural(conflicts, "active conflict")}* across {families}']
+    by_category = summary.get('active_conflicts_by_category') or {}
+    lines.extend(f' - {CATEGORY_LABELS[key]}: {by_category[key]}' for key in CATEGORY_ORDER if by_category.get(key))
+    return lines
+
+
+def _change_lines(summary: dict, previous_summary: dict, on_date: str) -> list[str]:
+    """
+    What moved since the previous report, or a single line saying nothing did.
+
+    Reports registered before a summary key existed simply read as 0, which overstates the change
+    once rather than hiding it. `active_flags` is deliberately not diffed: a conflict becoming a
+    refinement leaves it unchanged while the thing a reader cares about has moved.
+    """
+    deltas = {key: summary[key] - previous_summary.get(key, 0) for key in ('total_sgs', 'families_affected')}
+    deltas |= {
+        key: summary[key] - previous_summary.get(key, 0)
+        for key in ('active_conflicts', 'active_refinements', 'resolved_flags')
+    }
+
+    changes = []
+    if deltas['total_sgs'] > 0:
+        changes.append(f' - +{_plural(deltas["total_sgs"], "new sequencing group")} in the dataset')
+    if deltas['families_affected'] > 0:
+        changes.append(
+            f' - +{_plural(deltas["families_affected"], "additional family", "additional families")} flagged'
+        )
+    if deltas['active_conflicts'] > 0:
+        changes.append(f' - +{_plural(deltas["active_conflicts"], "new conflict")}')
+    elif deltas['active_conflicts'] < 0:
+        changes.append(f' - {_plural(-deltas["active_conflicts"], "fewer conflict")}')
+    if deltas['active_refinements'] > 0:
+        changes.append(f' - +{_plural(deltas["active_refinements"], "new pedigree refinement")}')
+    if deltas['resolved_flags'] > 0:
+        changes.append(f' - {_plural(deltas["resolved_flags"], "more flag")} resolved')
+
+    if not changes:
+        return [f'No change since the last report on {on_date}']
+    return [f'📢 *Changes since the last report on {on_date}*', *changes]
+
+
+def summary_message_text(
+    dataset: str,
+    *,
+    flags_html_url: str,
+    somalier_html_url: str,
+    seq_type: str,
+    seq_tech: str,
+    summary: dict,
+    previous_analysis: dict | None,
+) -> str:
+    """The Slack summary: what is flagged, where the report is, and what moved since last time."""
+    report_title = f'Somalier flags report ({seq_type} | {seq_tech})'
+    messages = [
+        f'*[{dataset}]* <{flags_html_url}|{report_title}>',
+        f'🔬 <{somalier_html_url}|Somalier relate report>',
+        *_headline_lines(summary),
+    ]
+
+    if summary['active_refinements']:
+        messages.append(
+            f'📋 {_plural(summary["active_refinements"], "pedigree refinement")}, where the recorded pedigree is '
+            'less specific than the genotypes rather than in conflict with them'
+        )
+
+    if summary['resolved_flags']:
+        messages.append(f'✔️ {_plural(summary["resolved_flags"], "flag")} previously resolved')
+
+    if previous_analysis:
+        # get_previous_analysis has already checked meta.summary is present.
+        on_date = (previous_analysis['timestampCompleted'] or '').split('T')[0]
+        messages.extend(_change_lines(summary, previous_analysis['meta']['summary'], on_date))
+
+    return '\n'.join(messages)
+
+
 def construct_summary_message(
     dataset: str,
     *,
@@ -848,6 +948,18 @@ def construct_summary_message(
     previous_analysis: dict | None,
 ):
     """Construct a Slack message with a concise summary and a link to the report."""
+    text = summary_message_text(
+        dataset,
+        flags_html_url=flags_html_url,
+        somalier_html_url=somalier_html_url,
+        seq_type=seq_type,
+        seq_tech=seq_tech,
+        summary=summary,
+        previous_analysis=previous_analysis,
+    )
+    logger.info(text)
+    if config_retrieve(['somalier_flags_report', 'send_to_slack'], default=True):
+        send_message(text)
 
 
 def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: str, somalier_html_url: str) -> None:
