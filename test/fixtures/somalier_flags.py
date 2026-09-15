@@ -18,7 +18,7 @@ Nothing here touches Metamist. `MOCK_SEQUENCING_GROUPS` mirrors DATASET_SGS_QUER
 `MOCK_SG_INFOS` mirrors what `get_sg_infos` would return, so a caller can skip both queries.
 """
 
-from rd_qc.scripts.somalier_flags_report import SGInfo
+from rd_qc.scripts.somalier_flags_report import ReadFile, SGInfo
 from rd_qc.utils import UNSPECIFIED_RELATED, relatedness_verdict
 
 AR_GUID = 'mock-ar-guid-0001'
@@ -171,8 +171,14 @@ MOCK_SG_INFOS: dict[str, SGInfo] = {
         sg_type='genome',
         sg_technology='short-read',
         sg_platform='illumina',
-        crams=[f'{sample}.cram'],
-        fastq_pairs=[(f'{sample}_R1.fastq.gz', f'{sample}_R2.fastq.gz')],
+        crams=[ReadFile(f'{sample}.cram', size='18.00 GiB', date=FIRST_SEEN[:10])],
+        fastq_pairs=[
+            (
+                ReadFile(f'{sample}_R1.fastq.gz', size='1.50 GiB', date=FIRST_SEEN[:10]),
+                # No size or date, as some uploads record neither.
+                ReadFile(f'{sample}_R2.fastq.gz'),
+            ),
+        ],
         other_reads=[],
         sample_external_id=sample,
         sample_type=sample_type,

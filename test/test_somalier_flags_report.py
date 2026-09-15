@@ -19,6 +19,7 @@ from rd_qc.scripts.somalier_flags_report import (
     INLINE_FLAG_LIMIT,
     SgFlags,
     SGInfo,
+    _extract_reads,
     _fmt_num,
     collect_somalier_flags,
     flag_sg_key,
@@ -30,9 +31,15 @@ from rd_qc.scripts.somalier_flags_report import (
     summarise_flags,
     summary_message_text,
 )
-from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
+from rd_qc.utils import (
+    UNSPECIFIED_RELATED,
+    SomalierRelatednessFlag,
+    SomalierSelfRelatednessFlag,
+    SomalierSexInferenceFlag,
+)
 
-CROSS_FAMILY_SUBJECT = 'CPG004 ↔ CPG010'
+# The glance line leads with participants; CPG004 is PID_C in FAM02, CPG010 is PID_H in FAM07.
+CROSS_FAMILY_SUBJECT = 'PID_C ↔ PID_H'
 
 
 def run_pipeline(sequencing_groups=MOCK_SEQUENCING_GROUPS, infos=MOCK_SG_INFOS):
@@ -151,7 +158,7 @@ def test_cross_family_flag_is_counted_once_despite_appearing_twice():
 
 def test_same_family_pedigree_flag_lands_in_one_group_only():
     _, active, _, _ = run_pipeline()
-    same_family_subject = 'CPG004 ↔ CPG005'
+    same_family_subject = 'PID_C ↔ PID_D'
 
     holders = [group.label for group in active if any(f.subject == same_family_subject for f in group.flags)]
 
@@ -165,7 +172,8 @@ def test_self_relatedness_groups_under_the_family_from_metamist():
 
     self_rows = [f for f in by_label['FAM03'].flags if f.category_key == 'self']
 
-    assert [f.subject for f in self_rows] == ['CPG002 ↔ CPG003']
+    # Both SGs belong to PID_B, so the subject is the one participant rather than a pair.
+    assert [f.subject for f in self_rows] == ['PID_B']
 
 
 def test_self_relatedness_falls_back_to_a_participant_group_with_no_family():
@@ -175,7 +183,7 @@ def test_self_relatedness_falls_back_to_a_participant_group_with_no_family():
 
     assert len(participant_groups) == 1
     assert participant_groups[0].label == '(no family) · PID_G'
-    assert [f.subject for f in participant_groups[0].flags] == ['CPG009 ↔ CPG011']
+    assert [f.subject for f in participant_groups[0].flags] == ['PID_G']
 
 
 def test_group_carries_the_sg_info_for_both_members_of_a_pair():
@@ -356,8 +364,9 @@ def test_refinements_render_in_their_own_section_with_the_explanation():
 
     assert 'Pedigree refinements' in html
     assert 'Pedigree conflicts' in html
-    # The section explains the one-parent-on-file cause, which is why these rows exist at all.
-    assert 'only one parent is in the database' in html
+    # The section explains the missing-parent cause, which is why these rows exist at all.
+    # Matched within one line, since the template's prose is hard-wrapped.
+    assert 'whenever a parent is missing' in html
 
 
 def test_a_dataset_of_only_refinements_still_shows_the_all_clear():
@@ -517,3 +526,161 @@ def test_message_survives_a_previous_summary_from_before_the_conflict_split():
     text = message_for(summary, previous)
 
     assert 'since the last report on 2026-08-20' in text
+
+
+# ---------------------------------------------------------------------------
+# Wording of an unspecified expectation
+# ---------------------------------------------------------------------------
+def refinement_row():
+    """FAM08's only flag: no recorded path between the pair, measured as siblings."""
+    _, active, _, _ = run_pipeline()
+    return group_by_label(active)['FAM08'].flags[0]
+
+
+def test_an_unspecified_expectation_reads_as_no_relationship_provided():
+    row = refinement_row()
+
+    # 'expected related at unknown level / measured siblings' is accurate but unclear: the point is
+    # that the pedigree has no data here, not that it asserted something vague.
+    assert row.result == 'No relationship provided / measured siblings'
+    assert 'related at unknown level' not in row.result
+
+
+def test_the_detail_table_uses_the_same_wording():
+    assert refinement_row().expected == 'No relationship provided'
+
+
+def test_a_stated_expectation_is_left_alone():
+    _, active, _, _ = run_pipeline()
+    row = group_by_label(active)['FAM02'].flags[0]
+
+    assert row.result == 'expected parent-child / measured unrelated'
+    assert row.expected == 'parent-child'
+
+
+def test_relabelling_does_not_touch_the_stored_relationship():
+    # The stored value is peddy's vocabulary, pinned in PEDDY_RELATIONSHIPS and part of the flag's
+    # reconciliation identity, so only the display may change.
+    flagged = {sf.sg_id: sf for sf in collect_somalier_flags(MOCK_SEQUENCING_GROUPS)}
+
+    assert flagged['CPG012'].flags[0].expected_relationship == UNSPECIFIED_RELATED
+
+
+def test_the_raw_relationship_is_still_searchable():
+    # A collaborator pasting the peddy string, or a saved filter, must still find the row.
+    assert 'related at unknown level' in refinement_row().search_blob
+
+
+def test_the_refinements_blurb_describes_the_case_that_actually_occurs():
+    html = render_fixture_html()
+
+    # 'siblings' -> 'full siblings' is satisfied by EXPECTED_DEGREES now, so it never reaches the
+    # refinements section and must not be described as the common case.
+    assert 'full siblings' not in html
+    assert 'no relationship' in html.lower()
+
+
+# ---------------------------------------------------------------------------
+# Glance line leads with the identifiers collaborators use
+# ---------------------------------------------------------------------------
+def test_a_pedigree_pair_leads_with_participants_and_demotes_the_sg_ids():
+    _, active, _, _ = run_pipeline()
+    row = next(f for f in group_by_label(active)['FAM02'].flags if f.category_key == 'pedigree')
+
+    assert row.subject == 'PID_C ↔ PID_D'
+    assert row.subject_detail == 'CPG004 ↔ CPG005'
+
+
+def test_a_self_relatedness_pair_leads_with_the_one_participant():
+    _, active, _, _ = run_pipeline()
+    row = next(f for f in group_by_label(active)['FAM03'].flags if f.category_key == 'self')
+
+    assert row.subject == 'PID_B'
+    assert row.subject_detail == 'CPG002 ↔ CPG003'
+
+
+def test_a_pair_with_no_known_participants_falls_back_to_the_sg_ids():
+    # Nothing to promote, so the SG ids stay in the lead rather than leaving the line blank.
+    flag = SomalierRelatednessFlag(**pedigree_flag('CPG404', 'CPG405', 'FAM99', 'parent-child', 'unrelated'))
+    rows = group_by_family([SgFlags(sg_id='CPG404', flags=(flag,))], {})
+
+    assert rows[0].flags[0].subject == 'CPG404 ↔ CPG405'
+    assert rows[0].flags[0].subject_detail == ''
+
+
+# ---------------------------------------------------------------------------
+# Read files
+# ---------------------------------------------------------------------------
+def fastq_assays(reads):
+    return [{'meta': {'reads_type': 'fastq', 'reads': reads}}]
+
+
+def test_fastq_reads_keep_their_pairing_and_carry_size_and_date():
+    _, pairs, _ = _extract_reads(
+        fastq_assays(
+            [
+                {
+                    'basename': 'S1_R1.fastq.gz',
+                    'size': 22280401447,
+                    'datetime_added': '2024-06-14T03:27:16.749000+00:00',
+                },
+                {
+                    'basename': 'S1_R2.fastq.gz',
+                    'size': 22512341519,
+                    'datetime_added': '2024-06-14T03:23:27.163000+00:00',
+                },
+            ]
+        )
+    )
+
+    assert len(pairs) == 1
+    r1, r2 = pairs[0]
+    assert (r1.name, r1.size, r1.date) == ('S1_R1.fastq.gz', '20.75 GiB', '2024-06-14')
+    assert (r2.name, r2.size, r2.date) == ('S1_R2.fastq.gz', '20.97 GiB', '2024-06-14')
+
+
+def test_reads_recorded_without_a_size_or_date_still_appear():
+    # Some uploads carry datetime_added: null, so neither field can be assumed present.
+    _, pairs, _ = _extract_reads(fastq_assays([{'basename': 'x_R1.fq.gz', 'size': None, 'datetime_added': None}]))
+
+    assert (pairs[0][0].name, pairs[0][0].size, pairs[0][0].date) == ('x_R1.fq.gz', '', '')
+
+
+def test_an_odd_number_of_fastqs_does_not_invent_a_partner():
+    _, pairs, _ = _extract_reads(
+        fastq_assays([{'basename': f'S_{n}.fq.gz'} for n in ('1_R1', '1_R2', '2_R1')]),
+    )
+
+    assert [[r.name for r in group] for group in pairs] == [['S_1_R1.fq.gz', 'S_1_R2.fq.gz'], ['S_2_R1.fq.gz']]
+
+
+def test_a_plain_path_string_still_yields_a_name():
+    crams, _, _ = _extract_reads([{'meta': {'reads_type': 'cram', 'reads': ['gs://bucket/path/S1.cram']}}])
+
+    assert [c.name for c in crams] == ['S1.cram']
+
+
+def test_each_read_file_renders_on_its_own_line():
+    html = render_fixture_html()
+
+    # Previously R1 and R2 were joined with a slash onto one line, which was unreadable once the
+    # real filenames ran to 90 characters.
+    assert '<div class="read">' in html
+    assert 'EXT_A_R1.fastq.gz</span>' in html
+    assert '&nbsp;/&nbsp;' not in html
+
+
+def test_the_rendered_read_lines_show_size_and_date_when_known():
+    html = render_fixture_html()
+
+    # Unlabelled: a GiB figure and a date read as themselves.
+    assert '<span class="read-meta">1.50 GiB</span>' in html
+    assert '<span class="read-meta">2026-06-01</span>' in html
+
+
+def test_a_read_with_no_size_or_date_renders_the_name_alone():
+    # The fixture's R2 has neither, so it must not emit an empty meta span.
+    html = render_fixture_html()
+    r2_line = next(line for line in html.splitlines() if 'EXT_A_R2.fastq.gz' in line)
+
+    assert 'read-meta' not in r2_line

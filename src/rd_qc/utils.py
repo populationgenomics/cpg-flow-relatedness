@@ -209,6 +209,17 @@ PEDDY_RELATIONSHIPS = frozenset(
 # from 'unknown', which is our own fallback for a sample missing from the PED entirely.
 UNSPECIFIED_RELATED = 'related at unknown level'
 
+# peddy's string is accurate but reads as though the pedigree asserted something vague, when it
+# means the pedigree holds no data for the pair. Display only: the stored relationship stays as
+# peddy wrote it, since it is pinned in PEDDY_RELATIONSHIPS above and forms part of a flag's
+# reconciliation identity.
+NO_RELATIONSHIP_LABEL = 'No relationship provided'
+
+
+def expected_relationship_label(relationship: str) -> str:
+    """The expected relationship as a collaborator should read it."""
+    return NO_RELATIONSHIP_LABEL if relationship == UNSPECIFIED_RELATED else relationship
+
 
 def refine_expected_relationship(relation: str, family_1: str | None, family_2: str | None) -> str:
     """
@@ -314,10 +325,13 @@ def relatedness_verdict(relationship: str, measured: str) -> str:
         return VERDICT_REFINEMENT
     if measured in acceptable:
         return VERDICT_OK
-    # Third-degree relatedness against an expectation of unrelated is not assertable: it overlaps
-    # the cohort background distribution, so surface it as a refinement rather than an error.
+    # Third-degree relatedness overlaps the cohort background distribution, so it cannot be
+    # asserted between two families: 'unrelated' only survives refine_expected_relationship for a
+    # cross-family pair, so that case is dropped entirely rather than reported. Co-parents are
+    # within one family, where the same measurement is evidence of consanguinity in that family
+    # unit, so those stay surfaced as refinements.
     if measured == DEGREE_THIRD and acceptable == frozenset({DEGREE_UNRELATED}):
-        return VERDICT_REFINEMENT
+        return VERDICT_REFINEMENT if relationship == 'mom-dad' else VERDICT_OK
     return VERDICT_CONFLICT
 
 

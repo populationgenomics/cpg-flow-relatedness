@@ -21,11 +21,14 @@ import jinja2
 from loguru import logger
 
 from rd_qc.utils import (
+    NO_RELATIONSHIP_LABEL,
+    UNSPECIFIED_RELATED,
     VERDICT_REFINEMENT,
     SomalierFlag,
     SomalierRelatednessFlag,
     SomalierSelfRelatednessFlag,
     SomalierSexInferenceFlag,
+    expected_relationship_label,
     sg_ids_tag,
 )
 
@@ -135,15 +138,26 @@ EXISTING_ANALYSES_QUERY = gql(
 )
 
 
+@dataclass(frozen=True)
+class ReadFile:
+    """One read file from an assay's meta, with its size and upload date formatted for display."""
+
+    name: str
+    size: str = ''
+    date: str = ''
+
+
 @dataclass
 class SGInfo:
     sg_id: str
     sg_type: str
     sg_technology: str
     sg_platform: str
-    crams: list[str]
-    fastq_pairs: list[tuple[str, str]]
-    other_reads: list[str]
+    crams: list[ReadFile]
+    # fastq reads grouped as the pairs they were sequenced as; usually two per group, but a
+    # trailing unpaired read gives a group of one.
+    fastq_pairs: list[tuple[ReadFile, ...]]
+    other_reads: list[ReadFile]
     sample_external_id: str
     sample_type: str
     participant_external_id: str
@@ -260,53 +274,72 @@ def _primary_external_id(obj: dict | None) -> str:
     return ext.get('') or next(iter(ext.values()), '')
 
 
-def _basename(entry: dict | str | None) -> str | None:
-    """Pull a file basename from a reads entry (dict or path string)."""
-    if isinstance(entry, dict):
-        return entry.get('basename') or ((entry.get('location') or '').rsplit('/', 1)[-1] or None)
+def _fmt_size(size: object) -> str:
+    """Byte count as GiB, or '' when the assay meta does not record one."""
+    if not isinstance(size, (int, float)) or isinstance(size, bool) or size <= 0:
+        return ''
+    return f'{size / 1024**3:.2f} GiB'
+
+
+def _fmt_date(value: object) -> str:
+    """The date part of an ISO timestamp. Some uploads record `datetime_added: null`."""
+    if not isinstance(value, str) or not value:
+        return ''
+    return value.split('T')[0]
+
+
+def _read_file(entry: dict | str | None) -> ReadFile | None:
+    """One reads entry as a display row. Entries are usually dicts, occasionally bare paths."""
     if isinstance(entry, str):
-        return entry.rsplit('/', 1)[-1] or None
-    return None
+        name = entry.rsplit('/', 1)[-1]
+        return ReadFile(name=name) if name else None
+    if not isinstance(entry, dict):
+        return None
+    name = entry.get('basename') or (entry.get('location') or '').rsplit('/', 1)[-1]
+    if not name:
+        return None
+    return ReadFile(name=name, size=_fmt_size(entry.get('size')), date=_fmt_date(entry.get('datetime_added')))
 
 
-def _extract_reads(assays: list[dict]) -> tuple[list[str], list[tuple[str, str]], list[str]]:
-    """Group an SG's assay read files into (crams, fastq_pairs, other).
-
-    Each assay's ``meta.reads`` is a list of file entries; ``meta.reads_type``
-    tells us whether they're fastq (R1/R2 pairs) or aligned (bam/cram).
+def _extract_reads(assays: list[dict]) -> tuple[list[ReadFile], list[tuple[ReadFile, ...]], list[ReadFile]]:
     """
-    crams: list[str] = []
-    fastq_pairs: list[tuple[str, str]] = []
-    other: list[str] = []
+    Group an SG's assay read files into (crams, fastq groups, other).
+
+    Each assay's ``meta.reads`` is a list of file entries and ``meta.reads_type`` says whether they
+    are fastq (R1/R2 pairs) or aligned (bam/cram). fastq entries stay grouped as the pairs they
+    were sequenced as, so the template can keep a pair together without joining the filenames.
+    """
+    crams: list[ReadFile] = []
+    fastq_groups: list[tuple[ReadFile, ...]] = []
+    other: list[ReadFile] = []
 
     for assay in assays:
         meta = assay.get('meta') or {}
         reads = meta.get('reads')
         reads_type = (meta.get('reads_type') or '').lower()
         entries = reads if isinstance(reads, list) else ([reads] if reads else [])
-        names = [n for n in (_basename(e) for e in entries) if n]
-        if not names:
+        files = [f for f in (_read_file(e) for e in entries) if f]
+        if not files:
             continue
 
         if reads_type == 'fastq':
-            # A fastq assay is one (or more) R1/R2 pair(s); pair sequentially.
-            for i in range(0, len(names), 2):
-                r2 = names[i + 1] if i + 1 < len(names) else ''
-                fastq_pairs.append((names[i], r2))
+            # Pair sequentially. A trailing unpaired read forms a group of one rather than being
+            # given an empty partner.
+            fastq_groups.extend(tuple(files[i : i + 2]) for i in range(0, len(files), 2))
         elif reads_type in ('bam', 'cram'):
-            crams.extend(names)
+            crams.extend(files)
         else:
             # Unknown reads_type, so classify by extension.
-            for name in names:
-                low = name.lower()
+            for file in files:
+                low = file.name.lower()
                 if low.endswith(('.cram', '.bam')):
-                    crams.append(name)
+                    crams.append(file)
                 elif low.endswith(('.fastq.gz', '.fq.gz', '.fastq', '.fq')):
-                    fastq_pairs.append((name, ''))
+                    fastq_groups.append((file,))
                 else:
-                    other.append(name)
+                    other.append(file)
 
-    return crams, fastq_pairs, other
+    return crams, fastq_groups, other
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +543,23 @@ def _member(sg_id: str, infos: dict[str, SGInfo], participant_fallback: str = ''
     )
 
 
+def _expected_label(relationship: str) -> str:
+    """The expected relationship as a collaborator should read it, or a dash when absent."""
+    return expected_relationship_label(relationship) or DASH
+
+
+def _result_line(expected: str, measured: str) -> str:
+    """
+    The one-line verdict for the inline glance row.
+
+    The unspecified case drops the 'expected' prefix, since its label already reads as a statement
+    about the pedigree rather than as a relationship name.
+    """
+    if expected == UNSPECIFIED_RELATED:
+        return f'{NO_RELATIONSHIP_LABEL} / measured {measured}'
+    return f'expected {expected} / measured {measured}'
+
+
 def _sex_row_parts(flag: SomalierSexInferenceFlag, owning_sg_id: str, infos: dict[str, SGInfo]) -> dict:
     member = _member(owning_sg_id, infos)
     return {
@@ -536,9 +586,10 @@ def _self_row_parts(flag: SomalierSelfRelatednessFlag, infos: dict[str, SGInfo])
         _member(flag.sg_id_1, infos, flag.participant_external_id),
         _member(flag.sg_id_2, infos, flag.participant_external_id),
     )
+    sg_pair = f'{flag.sg_id_1}{PAIR_SEP}{flag.sg_id_2}'
     return {
-        'subject': f'{flag.sg_id_1}{PAIR_SEP}{flag.sg_id_2}',
-        'subject_detail': flag.participant_external_id,
+        'subject': flag.participant_external_id or sg_pair,
+        'subject_detail': sg_pair if flag.participant_external_id else '',
         'members': members,
         'expected': 'same individual, relatedness ~1.0',
         'inferred': f'relatedness {_fmt_num(flag.relatedness)}',
@@ -561,15 +612,19 @@ def _self_row_parts(flag: SomalierSelfRelatednessFlag, infos: dict[str, SGInfo])
 def _pedigree_row_parts(flag: SomalierRelatednessFlag, infos: dict[str, SGInfo]) -> dict:
     members = (_member(flag.sg_id_1, infos), _member(flag.sg_id_2, infos))
     participants = [m.participant for m in members if m.participant]
+    sg_pair = f'{flag.sg_id_1}{PAIR_SEP}{flag.sg_id_2}'
+    # Participants lead, because that is what a collaborator recognises. The SG ids follow, demoted
+    # but still present, and take the lead themselves when no participant could be resolved.
+    known_participants = len(participants) == len(members)
     return {
-        'subject': f'{flag.sg_id_1}{PAIR_SEP}{flag.sg_id_2}',
-        'subject_detail': PAIR_SEP.join(participants) if len(participants) == len(members) else '',
+        'subject': PAIR_SEP.join(participants) if known_participants else sg_pair,
+        'subject_detail': sg_pair if known_participants else '',
         'members': members,
-        'expected': flag.expected_relationship or DASH,
+        'expected': _expected_label(flag.expected_relationship),
         # The measured degree, so the report says what the data supports rather than what a
         # pedigree reconstruction guessed.
         'inferred': f'{flag.inferred_relationship or DASH} (measured)',
-        'result': f'expected {flag.expected_relationship} / measured {flag.inferred_relationship}',
+        'result': _result_line(flag.expected_relationship, flag.inferred_relationship),
         # Expected and measured are rendered in their own column, and the family is the group
         # heading, so neither is repeated here.
         'details': (

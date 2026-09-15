@@ -67,7 +67,8 @@
         .flag-line.is-resolved { border-left-color: #b2bec3; }
         .flag-line .subject { font-weight: 600; font-family: ui-monospace, Menlo, Consolas, monospace;
                               font-size: 0.82rem; }
-        .flag-line .subject-detail { color: #74838d; font-size: 0.8rem; }
+        .flag-line .subject-detail { color: #74838d; font-size: 0.78rem;
+                                     font-family: ui-monospace, Menlo, Consolas, monospace; }
         .flag-line .result { color: #2d3436; }
         .flag-line .cross-family { display: inline-block; margin-left: 4px; color: #b9770e;
                                    font-size: 0.78rem; font-weight: 600; }
@@ -122,8 +123,14 @@
         .reads-list { max-height: 180px; overflow-y: auto; margin-top: 6px; padding: 6px 10px;
                       background: #fff; border: 1px solid #eee; border-radius: 6px;
                       font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.76rem; }
-        .reads-list .pair { padding: 1px 0; word-break: break-all; }
-        .reads-list .r2 { color: #74838d; }
+        /* A read group is one sequenced pair, separated from the next by a blank-ish gap. */
+        .reads-list .read-group { padding: 2px 0; }
+        .reads-list .read-group + .read-group { margin-top: 8px; border-top: 1px dotted #dfe6e9;
+                                               padding-top: 6px; }
+        .reads-list .read { padding: 1px 0; word-break: break-all; }
+        .reads-list .read-name { font-family: ui-monospace, Menlo, Consolas, monospace; }
+        .reads-list .read-meta { color: #74838d; white-space: nowrap; margin-left: 6px;
+                                 font-size: 0.75rem; }
 
         /* Refinements and resolved flags are both de-emphasised: neither needs a decision. */
         .refinement-section table, .resolved-section table { opacity: 0.72; }
@@ -136,6 +143,12 @@
 {# ---------------------------------------------------------------------- #}
 {# Reusable family-group table. Must be defined before it is called.      #}
 {# ---------------------------------------------------------------------- #}
+{# One read file: name, then its size and upload date when the assay meta recorded them. Neither
+   is labelled, since a GiB figure and a date are obvious on sight. #}
+{% macro read_line(r) %}
+<div class="read"><span class="read-name">{{ r.name }}</span>{% if r.size %} <span class="read-meta">{{ r.size }}</span>{% endif %}{% if r.date %} <span class="read-meta">{{ r.date }}</span>{% endif %}</div>
+{%- endmacro %}
+
 {% macro family_table(groups, is_resolved) %}
 <table>
     <thead>
@@ -238,11 +251,19 @@
                 <details class="reads-box" {{ 'open' if n_reads <= 3 else '' }}>
                     <summary>{{ n_reads }} read file group{{ '' if n_reads == 1 else 's' }} for {{ info.sg_id }}</summary>
                     <div class="reads-list">
-                        {% for r1, r2 in info.fastq_pairs %}
-                        <div class="pair">{{ r1 }}{% if r2 %} <span class="r2">&nbsp;/&nbsp;{{ r2 }}</span>{% endif %}</div>
+                        {# One line per file, with the pair kept together as a block: real fastq
+                           names run long enough that joining R1 and R2 was unreadable. #}
+                        {% for group in info.fastq_pairs %}
+                        <div class="read-group">
+                            {% for r in group %}{{ read_line(r) }}{% endfor %}
+                        </div>
                         {% endfor %}
-                        {% for c in info.crams %}<div class="pair">{{ c }}</div>{% endfor %}
-                        {% for o in info.other_reads %}<div class="pair">{{ o }}</div>{% endfor %}
+                        {% if info.crams or info.other_reads %}
+                        <div class="read-group">
+                            {% for c in info.crams %}{{ read_line(c) }}{% endfor %}
+                            {% for o in info.other_reads %}{{ read_line(o) }}{% endfor %}
+                        </div>
+                        {% endif %}
                     </div>
                 </details>
                 {% endif %}
@@ -328,10 +349,11 @@
     <div class="refinement-section">
         <h2>&#8505; Pedigree refinements <span class="count">{{ refinement_groups | length }} group{{ '' if refinement_groups | length == 1 else 's' }}</span></h2>
         <p class="blurb">These are not disagreements. The genotypes name a relationship that the recorded
-            pedigree leaves open, so they tell you the pedigree is incomplete rather than wrong. The most
-            common case by far is a pair recorded as <em>siblings</em> but inferred as <em>full siblings</em>,
-            which is what you get whenever only one parent is in the database: they really are full siblings,
-            but the pedigree cannot know that with the other parent's column empty.</p>
+            pedigree leaves open, so they tell you the pedigree is incomplete rather than wrong. Nearly all
+            of them read <em>no relationship provided</em>, meaning the pedigree places both people in the
+            same family but records no path between them, which is what you get whenever a parent is missing
+            from the database. Each one is a candidate pedigree correction: if the measured relationship
+            looks right, the pedigree can be updated to say so.</p>
         {{ family_table(refinement_groups, is_resolved=False) }}
     </div>
     {% endif %}

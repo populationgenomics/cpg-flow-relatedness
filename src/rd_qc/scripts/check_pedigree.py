@@ -21,11 +21,14 @@ from peddy import Ped, Sample
 
 from rd_qc.utils import (
     DEGREE_IDENTICAL,
+    NO_RELATIONSHIP_LABEL,
+    UNSPECIFIED_RELATED,
     VERDICT_OK,
     VERDICT_REFINEMENT,
     SomalierFlag,
     SomalierRelatednessFlag,
     SomalierSexInferenceFlag,
+    expected_relationship_label,
     infer_degree,
     refine_expected_relationship,
     relatedness_verdict,
@@ -66,9 +69,16 @@ def _format_mismatch_line(s1, s2, expected_ped_s1, expected_ped_s2, expected_rel
         line = s1 + (f' ({fam1})' if fam1 and fam1 != s1 else '')
         line += ' - '
         line += s2 + (f' ({fam2})' if fam2 and fam2 != s2 else '')
+    # The unspecified case drops the 'provided:' wrapper, since its label already reads as a
+    # statement about the pedigree. Matches how the flags report words the same thing.
+    provided = (
+        NO_RELATIONSHIP_LABEL
+        if expected_rel == UNSPECIFIED_RELATED
+        else f'provided: "{expected_relationship_label(expected_rel)}"'
+    )
     return (
         f'{line}, '
-        f'provided: "{expected_rel}", '
+        f'{provided}, '
         f'inferred: "{inferred_rel}", '
         f'kin={row["relatedness"]}, '
         f'ibs0={row["ibs0"]}, '

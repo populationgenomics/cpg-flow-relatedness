@@ -245,11 +245,31 @@ def test_bounds_are_the_geometric_midpoints_between_degrees():
     assert pytest.approx((0.125 * 0.0625) ** 0.5, abs=0.005) == THIRD_DEGREE_MIN_RELATEDNESS
 
 
-def test_distant_relatedness_against_an_unrelated_expectation_is_only_a_refinement():
-    # Not assertable: a real first cousin sits at 0.125, which is inside the background tail, so
-    # third-degree and true background are indistinguishable.
-    assert relatedness_verdict('unrelated', DEGREE_THIRD) == VERDICT_REFINEMENT
+def test_cross_family_third_degree_is_not_flagged_at_all():
+    # Not assertable across a family boundary: a real first cousin sits at 0.125, which is inside
+    # the background tail, so third-degree and true background are indistinguishable. An
+    # 'unrelated' expectation only survives refine_expected_relationship when the pair is
+    # cross-family, so this is exactly the cross-family case.
+    assert relatedness_verdict('unrelated', DEGREE_THIRD) == VERDICT_OK
+
+
+def test_co_parents_measuring_third_degree_stay_surfaced():
+    # Same measurement, but co-parents are within one family, where distant relatedness speaks to
+    # consanguinity in that family unit rather than to cohort background.
     assert relatedness_verdict('mom-dad', DEGREE_THIRD) == VERDICT_REFINEMENT
+
+
+def test_same_family_third_degree_with_no_recorded_path_stays_surfaced():
+    # The other same-family case: the pedigree records no path, so a distant measurement is still
+    # a candidate missing link and is not silenced.
+    assert relatedness_verdict(UNSPECIFIED_RELATED, DEGREE_THIRD) == VERDICT_REFINEMENT
+
+
+def test_the_cross_family_silence_depends_on_the_expectation_being_refined_first():
+    # Pins the coupling that makes the above work: a same-family pair with no blood path must have
+    # already been reframed, so it never reaches relatedness_verdict as 'unrelated'.
+    assert refine_expected_relationship('unrelated', 'FAM1', 'FAM1') == UNSPECIFIED_RELATED
+    assert refine_expected_relationship('unrelated', 'FAM1', 'FAM2') == 'unrelated'
 
 
 def test_closer_than_third_degree_against_an_unrelated_expectation_is_still_a_conflict():
@@ -260,6 +280,6 @@ def test_closer_than_third_degree_against_an_unrelated_expectation_is_still_a_co
 
 
 def test_a_cousin_expectation_is_still_satisfied_by_a_third_degree_measurement():
-    # The demotion above is specific to an 'unrelated' expectation; a stated cousin relationship
-    # confirmed by the measurement must not become a refinement.
+    # Reads as OK for a different reason than the cross-family case above: here the measurement
+    # confirms what the pedigree stated, rather than being too weak to assert.
     assert relatedness_verdict('cousins', DEGREE_THIRD) == VERDICT_OK

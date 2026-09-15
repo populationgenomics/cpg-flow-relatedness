@@ -37,6 +37,7 @@ import json
 import sys
 from argparse import ArgumentParser
 from dataclasses import asdict
+from dataclasses import fields as fields_of
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -55,6 +56,7 @@ from rd_qc.scripts.record_somalier_flags import (  # noqa: E402
 )
 from rd_qc.scripts.somalier_flags_report import (  # noqa: E402
     FLAG_CLASSES,
+    ReadFile,
     SGInfo,
     collect_somalier_flags,
     get_sg_infos,
@@ -108,7 +110,22 @@ def load_cache(cache: Path) -> dict:
     raw.setdefault('sgs', None)
     raw.setdefault('infos', {})
     raw.setdefault('expected_ped', None)
+    raw['infos'] = {sg_id: fields for sg_id, fields in raw['infos'].items() if _infos_are_current(fields)}
     return raw
+
+
+def _infos_are_current(fields: dict) -> bool:
+    """
+    Whether a cached SGInfo matches the shape this version of SGInfo expects.
+
+    A snapshot outlives changes to SGInfo, so a stale entry is dropped and re-fetched on the next
+    online run rather than crashing as_sg_infos. Read files gained their size and date fields this
+    way, having previously been bare filename strings.
+    """
+    if set(fields) != {f.name for f in fields_of(SGInfo)}:
+        return False
+    reads = [*fields['crams'], *fields['other_reads'], *(r for group in fields['fastq_pairs'] for r in group)]
+    return all(isinstance(read, dict) for read in reads)
 
 
 def save_cache(cache: Path, snapshot: dict) -> None:
@@ -117,9 +134,21 @@ def save_cache(cache: Path, snapshot: dict) -> None:
 
 
 def as_sg_infos(raw: dict) -> dict[str, SGInfo]:
-    """Rebuild SGInfo objects from the cached JSON, restoring the fastq pair tuples."""
+    """
+    Rebuild SGInfo objects from the cached JSON.
+
+    asdict() flattens the read files to plain dicts and the fastq pairs to lists, so both need
+    rebuilding for the template to see the same shape a live query produces.
+    """
     return {
-        sg_id: SGInfo(**{**fields, 'fastq_pairs': [tuple(pair) for pair in fields['fastq_pairs']]})
+        sg_id: SGInfo(
+            **{
+                **fields,
+                'crams': [ReadFile(**r) for r in fields['crams']],
+                'fastq_pairs': [tuple(ReadFile(**r) for r in group) for group in fields['fastq_pairs']],
+                'other_reads': [ReadFile(**r) for r in fields['other_reads']],
+            }
+        )
         for sg_id, fields in raw.items()
     }
 
