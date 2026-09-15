@@ -78,18 +78,18 @@ class SomalierSelfCheck(stage.DatasetStage):
         web_output_prefix = dataset.web_prefix() / 'identity_checks'
 
         outputs = {}
-        for participant_id, sg_list in index.by_participant.items():
+        for (_, peid), sg_list in index.by_participant.items():
             if len(sg_list) < _MIN_SGS_FOR_IDENTITY_CHECK:
                 continue
 
             tag = sg_ids_tag([info.sg_id for info in sg_list])
-            prefix = output_prefix / participant_id / f'{tag}.somalier_identity_check'
-            web_prefix = web_output_prefix / participant_id / f'{tag}.somalier_identity_check'
-            outputs[f'{participant_id}_prefix'] = str(prefix)
-            outputs[f'{participant_id}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
-            outputs[f'{participant_id}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
-            outputs[f'{participant_id}_html'] = to_path(str(web_prefix) + '.html')
-            outputs[f'{participant_id}_json'] = to_path(str(prefix) + '.checks.json')
+            prefix = output_prefix / peid / f'{tag}.somalier_identity_check'
+            web_prefix = web_output_prefix / peid / f'{tag}.somalier_identity_check'
+            outputs[f'{peid}_prefix'] = str(prefix)
+            outputs[f'{peid}_pairs_tsv'] = to_path(str(prefix) + '.pairs.tsv')
+            outputs[f'{peid}_samples_tsv'] = to_path(str(prefix) + '.samples.tsv')
+            outputs[f'{peid}_html'] = to_path(str(web_prefix) + '.html')
+            outputs[f'{peid}_json'] = to_path(str(prefix) + '.checks.json')
 
         return outputs
 
