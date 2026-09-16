@@ -28,6 +28,7 @@ SG_QUERY = gql("""
                     participant {
                         id
                         externalId
+                        phenotypes
                     }
                 }
                 analyses(type: {eq: "somalier"}) {
@@ -381,6 +382,36 @@ def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> 
         entries.append(SgSomalierInfo(sg_id, participant_id, participant_external_id, somalier_path))
 
     return SomalierIndex(entries)
+
+
+# Metamist records consanguinity against the child of the union, in the participant phenotypes dict
+CONSANGUINITY_PHENOTYPE = 'consanguinity'
+
+
+def consanguineous_sg_ids(sgs: list[dict]) -> set[str]:
+    """
+    The SG IDs in an SG_QUERY response whose participant records a consanguineous union.
+
+    Only the literal 1 counts. An absent key, a '0', or any other value is treated as not
+    recorded, so an unknown union keeps its flag instead of being quietly excused: a dataset that
+    has never supplied the field should lose no flags at all.
+    """
+    consanguineous = set()
+    for sg in sgs:
+        participant = ((sg.get('sample') or {}).get('participant')) or {}
+        phenotypes = participant.get('phenotypes') or {}
+        value = next(
+            (v for k, v in phenotypes.items() if k.strip().lower() == CONSANGUINITY_PHENOTYPE),
+            None,
+        )
+        if str(value).strip() == '1':
+            consanguineous.add(sg['id'])
+    return consanguineous
+
+
+def get_project_consanguineous_sg_ids(project: str) -> set[str]:
+    """SG IDs whose participant is recorded as the product of a consanguineous union."""
+    return consanguineous_sg_ids(_query_project_sgs(project))
 
 
 def find_sgids_without_somalier(index: SomalierIndex) -> set[str]:

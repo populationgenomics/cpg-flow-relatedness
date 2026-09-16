@@ -29,6 +29,7 @@ from rd_qc.utils import (
     SomalierRelatednessFlag,
     SomalierSexInferenceFlag,
     expected_relationship_label,
+    get_project_consanguineous_sg_ids,
     infer_degree,
     refine_expected_relationship,
     relatedness_verdict,
@@ -147,6 +148,25 @@ def _check_sex(samples_df: pd.DataFrame) -> dict[str, SomalierSexInferenceFlag]:
     return sex_mismatches_by_sgid
 
 
+CO_PARENTS = 'mom-dad'
+
+
+def _union_is_recorded_consanguineous(
+    expected_rel: str,
+    sample_1: Sample | dict,
+    sample_2: Sample | dict,
+    consanguineous_sgs: set[str],
+) -> bool:
+    """
+    Whether a flagged pair of parents have a recorded consanguineous union in the pedigree.
+    """
+    if expected_rel != CO_PARENTS or not consanguineous_sgs:
+        return False
+    kids_1 = {kid.sample_id for kid in getattr(sample_1, 'kids', [])}
+    kids_2 = {kid.sample_id for kid in getattr(sample_2, 'kids', [])}
+    return bool(kids_1 & kids_2 & consanguineous_sgs)
+
+
 def _mismatch_bucket(expected_rel: str, measured_rel: str, verdict: str) -> str:
     """Which reporting bucket a flagged pair belongs in, most serious first."""
     if measured_rel == DEGREE_IDENTICAL:
@@ -190,12 +210,16 @@ def _check_relatedness(
     pairs_df,
     expected_ped: Ped,
     bad_ids: list,
+    consanguineous_sgs: set[str] | None = None,
 ) -> dict[str, list[SomalierRelatednessFlag]]:
     """
     Compare what the pedigree expects against what somalier measured, pair by pair.
 
     peddy is used only on the expected pedigree. The relationship the data supports
     comes from the kinship coefficient and ibs0 via `infer_degree`.
+
+    `consanguineous_sgs` lets a co-parent pair be excused when the pedigree already records their
+    union. Empty or omitted means nothing is excused.
     """
     info('*Relatedness:*')
     expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
@@ -228,6 +252,12 @@ def _check_relatedness(
         pairs_df.loc[idx, 'inferred_rel'] = measured_rel
 
         if verdict == VERDICT_OK:
+            continue
+
+        if _union_is_recorded_consanguineous(
+            expected_rel, expected_ped_s1, expected_ped_s2, consanguineous_sgs or set()
+        ):
+            logger.info(f'{s1} - {s2}: related co-parents, but a child records the union. Not flagged.')
             continue
 
         # Make sure that the s1 / s2 sample IDs are sorted to ensure consistent keying
@@ -267,11 +297,14 @@ def produce_flags(
     somalier_samples: str,
     somalier_pairs: str,
     expected_ped_path: str,
+    consanguineous_sgs: set[str] | None = None,
 ) -> tuple[dict[str, list[SomalierFlag]], pd.DataFrame, pd.DataFrame]:
     """
     Read the somalier relate outputs and produce every flag they imply, keyed by SG id.
 
-    Returns the flags plus both dataframes, which `run` needs for its logging.
+    Reads only local files, so callers that have Metamist access pass `consanguineous_sgs` in
+    rather than having this query for it. Returns the flags plus both dataframes, which `run`
+    needs for its logging.
     """
     logger.info(somalier_samples)
     samples_df = pd.read_csv(somalier_samples, delimiter='\t')
@@ -294,6 +327,7 @@ def produce_flags(
         pairs_df,
         expected_ped,
         bad_ids,
+        consanguineous_sgs,
     )
 
     all_flags_by_sg_id: dict[str, list[SomalierFlag]] = {}
@@ -327,6 +361,7 @@ def run(
         somalier_samples=somalier_samples,
         somalier_pairs=somalier_pairs,
         expected_ped_path=expected_ped,
+        consanguineous_sgs=get_project_consanguineous_sg_ids(dataset),
     )
 
     print_contents(

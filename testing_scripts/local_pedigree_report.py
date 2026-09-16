@@ -66,7 +66,12 @@ from rd_qc.scripts.somalier_flags_report import (  # noqa: E402
     split_active_resolved,
     summarise_flags,
 )
-from rd_qc.utils import SomalierFlag, build_ped_content, get_project_sgs_and_fingerprints  # noqa: E402
+from rd_qc.utils import (  # noqa: E402
+    SomalierFlag,
+    build_ped_content,
+    get_project_consanguineous_sg_ids,
+    get_project_sgs_and_fingerprints,
+)
 
 from cpg_utils.config import set_config_paths  # noqa: E402
 from metamist.graphql import gql, query  # noqa: E402
@@ -110,6 +115,7 @@ def load_cache(cache: Path) -> dict:
     raw.setdefault('sgs', None)
     raw.setdefault('infos', {})
     raw.setdefault('expected_ped', None)
+    raw.setdefault('consanguineous_sgs', None)
     raw['infos'] = {sg_id: fields for sg_id, fields in raw['infos'].items() if _infos_are_current(fields)}
     return raw
 
@@ -355,7 +361,33 @@ def resolve_expected_ped(input_dir: Path, dataset: str, snapshot: dict, args) ->
     return path, content
 
 
-def derive_flags(input_dir: Path, expected_ped: Path, from_checks_json: bool) -> dict[str, list[dict]]:
+def resolve_consanguineous_sgs(dataset: str, snapshot: dict, args) -> set[str]:
+    """
+    The SGs whose participant records a consanguineous union, cached so --offline keeps working.
+
+    An offline run with nothing cached returns an empty set, which excuses nothing. That matches
+    how an absent phenotype is treated, so the worst case is a co-parent flag that a later online
+    run would have dropped.
+    """
+    if args.offline:
+        cached = snapshot.get('consanguineous_sgs')
+        if cached is None:
+            logger.warning('--offline given with no cached consanguinity data, so no pair will be excused by it')
+            return set()
+        return set(cached)
+
+    sg_ids = get_project_consanguineous_sg_ids(dataset)
+    snapshot['consanguineous_sgs'] = sorted(sg_ids)
+    logger.info(f'{len(sg_ids)} SG(s) record a consanguineous union in Metamist')
+    return sg_ids
+
+
+def derive_flags(
+    input_dir: Path,
+    expected_ped: Path,
+    from_checks_json: bool,
+    consanguineous_sgs: set[str],
+) -> dict[str, list[dict]]:
     """Produce the flags locally from the downloaded somalier outputs."""
     if from_checks_json:
         new_flags_by_sg = flags_from_checks_json(find_input(input_dir, '.checks.json'))
@@ -370,6 +402,7 @@ def derive_flags(input_dir: Path, expected_ped: Path, from_checks_json: bool) ->
         somalier_samples=str(find_input(input_dir, '.samples.tsv')),
         somalier_pairs=str(find_input(input_dir, '.pairs.tsv')),
         expected_ped_path=str(expected_ped),
+        consanguineous_sgs=consanguineous_sgs,
     )
     new_flags_by_sg = {sg_id: [asdict(f) for f in flags] for sg_id, flags in flags_by_sg.items()}
     logger.info(f'Derived flags for {len(new_flags_by_sg)} SG(s) from the somalier TSVs')
@@ -407,7 +440,9 @@ def main() -> None:
     expected_ped, ped_content = resolve_expected_ped(input_dir, args.dataset, snapshot, args)
     save_cache(cache, snapshot)
 
-    new_flags_by_sg = derive_flags(input_dir, expected_ped, args.from_checks_json)
+    consanguineous_sgs = resolve_consanguineous_sgs(args.dataset, snapshot, args)
+    save_cache(cache, snapshot)
+    new_flags_by_sg = derive_flags(input_dir, expected_ped, args.from_checks_json, consanguineous_sgs)
     if not args.from_checks_json:
         warn_on_stale_provided_sex(ped_content, find_input(input_dir, '.samples.tsv'))
 
