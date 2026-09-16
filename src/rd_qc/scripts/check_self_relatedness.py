@@ -1,44 +1,89 @@
 """
 Check somalier self-relatedness results for a single participant.
-If any SG pair has kinship below the threshold, sends a Slack alert.
+If any SG pair has relatedness below the threshold, sends a Slack alert.
 Registers the relate results in metamist with QC flags.
 Always exits 0.
 """
 
 import csv
+import json
 from argparse import ArgumentParser
+from dataclasses import asdict
+from typing import Any
 
 from loguru import logger
 
+from rd_qc.utils import SomalierSelfRelatednessFlag, get_somalier_relate_analyses
+
 from cpg_flow.metamist import get_metamist
-from cpg_utils import config, slack
+from cpg_utils import config, slack, to_path
 from cpg_utils.metamist_registration import create_new
 
 
-def run(
-    pairs_fpath: str,
-    participant_id: str,
+def write_result_json(
     dataset: str,
-    kinship_threshold: float,
+    participant_external_id: str,
+    relatedness_threshold: float,
+    html_url: str | None,
+    low_relatedness_pairs: list[dict[str, Any]],
+    flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]],
+    output_json: str | None = None,
+):
+    """
+    Write a JSON file with the self-relatedness check results.
+    """
+    result: dict[str, Any] = {
+        'dataset': dataset,
+        'participant_external_id': participant_external_id,
+        'relatedness_threshold': relatedness_threshold,
+        'html_url': html_url,
+        'n_flags': len(low_relatedness_pairs),
+        'self_relatedness_flags': {sg_id: [asdict(flag) for flag in flags] for sg_id, flags in flags_by_sg_id.items()},
+    }
+
+    if output_json:
+        with to_path(output_json).open('w') as f:
+            json.dump(result, f, indent=2)
+
+
+def register_analysis(
+    dataset: str,
+    participant_id: int,
+    participant_external_id: str,
     sg_ids: list[str],
     output_pairs: str,
     output_samples: str,
     output_html: str,
-    html_url: str,
+    output_json: str,
+    flagged: bool,
 ):
-    dataset = get_metamist().get_metamist_proj(dataset)
-    logger.info(f'Checking self-relatedness for {participant_id} in {dataset}')
-    logger.info(f'Kinship threshold: {kinship_threshold}')
+    meta = {
+        'stage': 'SomalierSelfCheck',
+        'participant_id': participant_id,
+        'participant_external_id': participant_external_id,
+        'flagged': flagged,
+    }
+    create_new(
+        project=dataset,
+        output=output_pairs,
+        analysis_type='somalier_relate',
+        sgs=sg_ids,
+        meta=meta,
+        secondary={'samples': output_samples, 'html': output_html, 'json': output_json},
+    )
 
-    low_kinship_pairs = []
 
+def read_low_relatedness_pairs(somalier_pairs: str, relatedness_threshold: float) -> list[dict[str, Any]] | None:
+    """
+    The pairs in somalier's output that fall below the threshold, or None if the file is missing.
+    """
+    pairs: list[dict[str, Any]] = []
     try:
-        with open(pairs_fpath) as f:
-            reader = csv.DictReader(f, delimiter='\t')
-            for row in reader:
+        with open(somalier_pairs) as f:
+            for row in csv.DictReader(f, delimiter='\t'):
                 relatedness = float(row['relatedness'])
-                if relatedness < kinship_threshold:
-                    low_kinship_pairs.append(
+                if relatedness < relatedness_threshold:
+                    pairs.append(
                         {
                             'sample_a': row['#sample_a'],
                             'sample_b': row['sample_b'],
@@ -48,77 +93,248 @@ def run(
                         },
                     )
     except FileNotFoundError:
-        logger.warning(f'Pairs file not found: {pairs_fpath} — skipping')
+        logger.warning(f'Pairs file not found: {somalier_pairs} — skipping')
+        return None
+    return pairs
+
+
+def find_existing_analysis(
+    analyses: list[dict],
+    participant_id: int,
+    participant_external_id: str,
+) -> dict | None:
+    """
+    This participant's existing somalier_relate analysis, if one is recorded.
+
+    Older records key the participant on the internal integer ID, newer ones on the external ID
+    under either key, so all three spellings are accepted.
+    """
+    for analysis in analyses:
+        meta = analysis['meta']
+        if (
+            meta.get('participant_id') in (participant_id, participant_external_id)
+            or meta.get('participant_external_id') == participant_external_id
+        ):
+            return analysis
+    return None
+
+
+def register_passing_analysis(
+    dataset: str,
+    participant_id: int,
+    participant_external_id: str,
+    sg_ids: list[str],
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
+    output_json: str,
+):
+    """
+    Register a passing analysis for this participant unless one is already recorded.
+
+    An existing flagged analysis is warned about rather than updated.
+    TODO: updating it would mean checking the recorded SG IDs still match the passing set.
+    """
+    existing = find_existing_analysis(
+        get_somalier_relate_analyses(dataset),
+        participant_id,
+        participant_external_id,
+    )
+    if existing is None:
+        logger.info(f'No existing analysis found for participant {participant_external_id}')
+        register_analysis(
+            dataset=dataset,
+            participant_id=participant_id,
+            participant_external_id=participant_external_id,
+            sg_ids=sg_ids,
+            output_pairs=output_pairs,
+            output_samples=output_samples,
+            output_html=output_html,
+            output_json=output_json,
+            flagged=False,
+        )
         return
 
-    passed = len(low_kinship_pairs) == 0
+    logger.info(f'Found existing analysis {existing["id"]} for participant {participant_external_id}')
+    if existing['meta'].get('flagged', False):
+        logger.warning(
+            f'Existing analysis {existing["id"]} for participant {participant_external_id} is flagged, but the '
+            'current check passed. Consider updating the analysis record.'
+        )
 
-    if passed:
-        logger.info(f'{participant_id}: All pairs have kinship >= {kinship_threshold}')
-    else:
-        header = f'Self-relatedness check failed for participant {participant_id}'
-        if html_url:
-            header = f'<{html_url}|{header}>'
-        lines = [
-            f'*[{dataset}]* {header}',
-            f'Expected kinship ~1.0 (threshold: {kinship_threshold}), found:',
-        ]
-        for pair in low_kinship_pairs:
-            lines.append(
-                f'  {pair["sample_a"]} - {pair["sample_b"]}: '
-                f'kinship={pair["relatedness"]}, '
-                f'ibs0={pair["ibs0"]}, ibs2={pair["ibs2"]}',
+
+def build_alert_and_flags(
+    dataset: str,
+    participant_external_id: str,
+    relatedness_threshold: float,
+    html_url: str,
+    low_relatedness_pairs: list[dict[str, Any]],
+) -> tuple[str, dict[str, list[SomalierSelfRelatednessFlag]]]:
+    """
+    The Slack alert text and the flags to record, one per failing pair.
+
+    Each pair's samples are sorted so the same pair always reads the same way, and the flag is
+    recorded against the first of the two only.
+    TODO: record against both and de-duplicate on an "sg_id_1-sg_id_2" key when rendering instead.
+    """
+    header = f'Self-relatedness check failed for participant {participant_external_id}'
+    if html_url:
+        header = f'<{html_url}|{header}>'
+    lines = [
+        f'*[{dataset}]* {header}',
+        f'Expected relatedness ~1.0 (threshold: {relatedness_threshold}), found:',
+    ]
+
+    flags_by_sg_id: dict[str, list[SomalierSelfRelatednessFlag]] = {}
+    for pair in low_relatedness_pairs:
+        s1, s2 = sorted([pair['sample_a'], pair['sample_b']])
+        lines.append(
+            f'  {s1} - {s2}: relatedness={pair["relatedness"]}, ibs0={pair["ibs0"]}, ibs2={pair["ibs2"]}',
+        )
+        flags_by_sg_id.setdefault(s1, []).append(
+            SomalierSelfRelatednessFlag(
+                category='self_relatedness_mismatch',
+                sg_id_1=s1,
+                sg_id_2=s2,
+                participant_external_id=participant_external_id,
+                threshold=relatedness_threshold,
+                relatedness=float(pair['relatedness']),
+                ibs0=int(pair['ibs0']),
+                ibs2=int(pair['ibs2']),
             )
+        )
 
-        text = '\n'.join(lines)
-        logger.warning(text)
+    return '\n'.join(lines), flags_by_sg_id
 
-        if config.config_retrieve(
-            ['somalier_self_check', 'send_to_slack'],
-            default=True,
-        ):
-            slack.send_message(text)
 
-    # Register results in metamist
-    meta = {
-        'check': 'identity',
-        'participant_id': participant_id,
-        'passed': passed,
-        'kinship_threshold': kinship_threshold,
-        'flagged_pairs': low_kinship_pairs,
-    }
+def run(
+    dataset: str,
+    participant_id: int,
+    participant_external_id: str,
+    sg_ids: list[str],
+    somalier_pairs: str,
+    somalier_samples: str,
+    output_pairs: str,
+    output_samples: str,
+    output_html: str,
+    html_url: str,
+    output_json: str,
+):
+    """
+    Check somalier self-relatedness results for a single participant.
+    If any SG pair has relatedness below the threshold, sends a Slack alert,
+    writes the output files, and registers the relate results in Metamist.
+    """
 
-    create_new(
-        project=dataset,
-        output=output_pairs,
-        analysis_type='somalier_relate',
-        sgs=sg_ids,
-        meta=meta,
-        secondary={'samples': output_samples, 'html': output_html},
+    dataset = get_metamist().get_metamist_proj(dataset)
+    logger.info(f'Checking self-relatedness for {participant_external_id} in {dataset}')
+    relatedness_threshold = config.config_retrieve(
+        ['somalier_self_check', 'relatedness_threshold'],
+        0.9,
     )
-    logger.info(f'Registered somalier_relate analysis for participant {participant_id}')
+    logger.info(f'Relatedness threshold: {relatedness_threshold}')
+
+    low_relatedness_pairs = read_low_relatedness_pairs(somalier_pairs, relatedness_threshold)
+    if low_relatedness_pairs is None:
+        # If the pairs file does not exist or cannot be read, exit early
+        return
+
+    # Write the files out
+    with to_path(output_samples).open('w') as f:
+        f.write(to_path(somalier_samples).read_text())
+    with to_path(output_pairs).open('w') as f:
+        f.write(to_path(somalier_pairs).read_text())
+
+    if not low_relatedness_pairs:
+        # All pairs have relatedness above the threshold, exit early
+        logger.info(
+            f'{participant_id} ({participant_external_id}): All pairs have relatedness >= {relatedness_threshold}'
+        )
+        write_result_json(
+            dataset=dataset,
+            participant_external_id=participant_external_id,
+            relatedness_threshold=relatedness_threshold,
+            html_url=html_url,
+            low_relatedness_pairs=[],
+            flags_by_sg_id={},
+            output_json=output_json,
+        )
+        register_passing_analysis(
+            dataset=dataset,
+            participant_id=participant_id,
+            participant_external_id=participant_external_id,
+            sg_ids=sg_ids,
+            output_pairs=output_pairs,
+            output_samples=output_samples,
+            output_html=output_html,
+            output_json=output_json,
+        )
+        return
+
+    text, flags_by_sg_id = build_alert_and_flags(
+        dataset=dataset,
+        participant_external_id=participant_external_id,
+        relatedness_threshold=relatedness_threshold,
+        html_url=html_url,
+        low_relatedness_pairs=low_relatedness_pairs,
+    )
+    logger.warning(text)
+
+    if config.config_retrieve(
+        ['somalier_self_check', 'send_to_slack'],
+        default=True,
+    ):
+        slack.send_message(text)
+
+    write_result_json(
+        dataset=dataset,
+        participant_external_id=participant_external_id,
+        relatedness_threshold=relatedness_threshold,
+        html_url=html_url,
+        low_relatedness_pairs=low_relatedness_pairs,
+        flags_by_sg_id=flags_by_sg_id,
+        output_json=output_json,
+    )
+
+    register_analysis(
+        dataset=dataset,
+        participant_id=participant_id,
+        participant_external_id=participant_external_id,
+        sg_ids=sg_ids,
+        output_pairs=output_pairs,
+        output_samples=output_samples,
+        output_html=output_html,
+        output_json=output_json,
+        flagged=True,
+    )
+    logger.info(f'Registered somalier_relate analysis for participant {participant_external_id}')
+    logger.info(html_url)
 
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--pairs-tsv', required=True)
-    parser.add_argument('--participant-id', required=True)
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--kinship-threshold', type=float, default=0.9)
-    parser.add_argument('--sg-ids', required=True, help='Comma-separated SG IDs')
-    parser.add_argument('--output-pairs', required=True)
-    parser.add_argument('--output-samples', required=True)
-    parser.add_argument('--output-html', required=True)
+    parser.add_argument('--participant-id', required=True, type=int, help='Internal ID of the participant')
+    parser.add_argument('--participant-external-id', required=True, help='External ID of the participant')
+    parser.add_argument('--sg-ids', nargs='+', required=True, help='space-separated SG IDs')
+    parser.add_argument('--somalier-pairs', required=True, help='Somalier pairs.tsv file from relate job')
+    parser.add_argument('--somalier-samples', required=True, help='Somalier samples.tsv file from relate job')
+    parser.add_argument('--output-pairs', required=True, help='gs:// path to output pairs TSV')
+    parser.add_argument('--output-samples', required=True, help='gs:// path to output samples TSV')
+    parser.add_argument('--output-html', required=True, help='gs:// path to HTML report')
     parser.add_argument('--html-url', required=True, help='Web-accessible URL for HTML report')
+    parser.add_argument('--output-json', required=True, help='gs:// path to JSON output for results')
     args = parser.parse_args()
     run(
-        pairs_fpath=args.pairs_tsv,
-        participant_id=args.participant_id,
         dataset=args.dataset,
-        kinship_threshold=args.kinship_threshold,
-        sg_ids=args.sg_ids.split(','),
+        participant_id=args.participant_id,
+        participant_external_id=args.participant_external_id,
+        sg_ids=args.sg_ids,
+        somalier_pairs=args.somalier_pairs,
+        somalier_samples=args.somalier_samples,
         output_pairs=args.output_pairs,
         output_samples=args.output_samples,
         output_html=args.output_html,
         html_url=args.html_url,
+        output_json=args.output_json,
     )
