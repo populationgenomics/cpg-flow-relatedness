@@ -985,6 +985,10 @@ def render_report(
         active_groups, _infos_of(active_groups)
     )
     chips = category_chips(conflict_groups)
+    # Counts every section, not just the active ones: a dataset with no conflicts but thirty
+    # refinements still needs a search box, and the bar now lives outside the conflicts block.
+    total_groups = len(conflict_groups) + len(refinement_groups) + len(same_individual_groups) + len(resolved_groups)
+    show_filter_bar = len(chips) > 1 or total_groups > MIN_GROUPS_FOR_FILTER_BAR
     return template.render(
         dataset=dataset,
         generated_at=generated_at or datetime.now(tz=UTC).isoformat(timespec='seconds'),
@@ -996,7 +1000,7 @@ def render_report(
         relatedness_bands=RELATEDNESS_BANDS,
         category_chips=chips,
         inline_flag_limit=INLINE_FLAG_LIMIT,
-        show_filter_bar=len(chips) > 1 or len(active_groups) > MIN_GROUPS_FOR_FILTER_BAR,
+        show_filter_bar=show_filter_bar,
         cross_family_mark=CROSS_FAMILY_MARK,
         dash=DASH,
     )

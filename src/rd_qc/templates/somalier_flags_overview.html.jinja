@@ -56,6 +56,9 @@
         .chip:hover { background: #e9ecef; }
         .chip.active { background: #0984e3; color: #fff; border-color: #0984e3; }
         .filter-count { font-size: 0.8rem; color: #636e72; margin-top: 8px; }
+        .sort-toggles { display: flex; gap: 6px; align-items: center; }
+        .sort-toggles .sort-label { font-size: 0.75rem; text-transform: uppercase;
+                                    letter-spacing: 0.5px; color: #636e72; }
 
         table { width: 100%; border-collapse: collapse; background: #fff;
                 border-radius: 8px; overflow: hidden;
@@ -184,6 +187,10 @@
         <tr class="group-row"
             data-categories="{{ group.flags | map(attribute='category_key') | unique | join(' ') }}"
             data-search="{{ group.search_blob }}"
+            {# Server-side position, so the default sort can be restored exactly rather than
+               re-derived in the browser. Outer loop: no nested loop has opened yet. #}
+            data-order="{{ loop.index0 }}"
+            data-newest-sg="{{ group.newest_sg_rank }}"
             onclick="toggleDetail(this)">
             <td>
                 <div class="id-primary"><span class="id-family">{{ group.label }}</span></div>
@@ -352,26 +359,39 @@
     </div>
 
     {# ------------------------------------------------------------------ #}
+    {# Page-scope filter bar. Search and sort reach every section; the    #}
+    {# category chips describe the conflict groups, so they apply only to #}
+    {# the section marked data-categorised.                               #}
+    {# ------------------------------------------------------------------ #}
+    {% if show_filter_bar %}
+    <div class="filter-bar">
+        <div class="filter-row">
+            <input type="text" id="search-input" placeholder="Search family / participant / sample / SG&hellip;" oninput="applyFilters()">
+            {% if category_chips | length > 1 %}
+            <div class="category-toggles">
+                {% for c in category_chips %}
+                <button type="button" class="chip category-chip" data-category="{{ c.key }}" onclick="toggleChip(this)">{{ c.label }} ({{ c.count }})</button>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        <div class="filter-row" style="margin-top: 8px">
+            <div class="sort-toggles">
+                <span class="sort-label">Sort</span>
+                <button type="button" class="chip sort-chip active" data-sort="default" onclick="toggleSort(this)">Most flags</button>
+                <button type="button" class="chip sort-chip" data-sort="newest" onclick="toggleSort(this)">Newest samples first</button>
+            </div>
+        </div>
+        <div class="filter-count" id="filter-count"></div>
+    </div>
+    {% endif %}
+
+    {# ------------------------------------------------------------------ #}
     {# Section 1: conflicts, where pedigree and genotypes disagree        #}
     {# ------------------------------------------------------------------ #}
     <h2>&#9888; Pedigree conflicts <span class="count">{{ conflict_groups | length }} group{{ '' if conflict_groups | length == 1 else 's' }}</span></h2>
     {% if conflict_groups %}
-        {% if show_filter_bar %}
-        <div class="filter-bar">
-            <div class="filter-row">
-                <input type="text" id="search-input" placeholder="Search family / participant / sample / SG&hellip;" oninput="applyFilters()">
-                {% if category_chips | length > 1 %}
-                <div class="category-toggles">
-                    {% for c in category_chips %}
-                    <button type="button" class="chip category-chip" data-category="{{ c.key }}" onclick="toggleChip(this)">{{ c.label }} ({{ c.count }})</button>
-                    {% endfor %}
-                </div>
-                {% endif %}
-            </div>
-            <div class="filter-count" id="filter-count"></div>
-        </div>
-        {% endif %}
-        <div id="active-rows">
+        <div data-section="conflicts" data-section-label="conflict groups" data-categorised="1">
             {{ family_table(conflict_groups, is_resolved=False) }}
         </div>
     {% else %}
@@ -392,7 +412,9 @@
             can simply be recorded. Others cannot be closed at all: a pedigree expresses relationships
             only through parent links, so when the individual who would connect the pair is absent from
             the database, there is no way to state the relationship until that record exists.</p>
-        {{ family_table(refinement_groups, is_resolved=False) }}
+        <div data-section="refinements" data-section-label="refinement groups">
+            {{ family_table(refinement_groups, is_resolved=False) }}
+        </div>
     </div>
     {% endif %}
 
@@ -412,7 +434,9 @@
             near 1.0 is the expected result, not a mismatch. Whether the two groups really are the same
             person is checked separately: if that check fails, it appears above tagged
             <em>Self-relatedness</em> rather than here.</p>
-        {{ family_table(same_individual_groups, is_resolved=False) }}
+        <div data-section="same-individual" data-section-label="same-individual groups">
+            {{ family_table(same_individual_groups, is_resolved=False) }}
+        </div>
     </div>
     {% endif %}
 
@@ -422,7 +446,9 @@
     {% if resolved_groups %}
     <div class="resolved-section">
         <h2>&#10003; Resolved &mdash; past incidents <span class="count">{{ resolved_groups | length }} group{{ '' if resolved_groups | length == 1 else 's' }}</span></h2>
-        {{ family_table(resolved_groups, is_resolved=True) }}
+        <div data-section="resolved" data-section-label="resolved groups">
+            {{ family_table(resolved_groups, is_resolved=True) }}
+        </div>
     </div>
     {% endif %}
 </div>
@@ -436,7 +462,11 @@ function toggleDetail(row) {
     if (toggle) toggle.textContent = open ? '▾' : '▸';
 }
 
-// ---- Filter bar (active section only) ------------------------------------
+// ---- Filter and sort (every section) -------------------------------------
+function sections() {
+    return Array.from(document.querySelectorAll('[data-section]'));
+}
+
 function selectedCategories() {
     return Array.from(document.querySelectorAll('.category-chip.active')).map(c => c.dataset.category);
 }
@@ -446,36 +476,76 @@ function toggleChip(btn) {
     applyFilters();
 }
 
+// Collapsing on every filter or sort keeps a hidden or moved row from leaving an orphan detail
+// row open next to the wrong family.
+function collapse(row) {
+    const detail = row.nextElementSibling;
+    if (detail && detail.classList.contains('group-detail')) {
+        detail.style.display = 'none';
+        const toggle = row.querySelector('.toggle');
+        if (toggle) toggle.textContent = '▸';
+    }
+}
+
+// The labels are stored plural, since a count of one is the exception.
+function pluralise(n, label) {
+    return n === 1 ? label.replace(/s$/, '') : label;
+}
+
 function applyFilters() {
-    const container = document.getElementById('active-rows');
-    if (!container) return;
     const categories = selectedCategories();
     const searchEl = document.getElementById('search-input');
     const search = (searchEl ? searchEl.value : '').toLowerCase().trim();
+    const parts = [];
 
-    const rows = container.querySelectorAll('.group-row');
-    let shown = 0;
-    rows.forEach(row => {
-        const rowCategories = (row.dataset.categories || '').split(' ').filter(Boolean);
-        const okCategory = categories.length === 0 || categories.some(c => rowCategories.includes(c));
-        const okSearch = search === '' || (row.dataset.search || '').includes(search);
-        const visible = okCategory && okSearch;
+    sections().forEach(section => {
+        // The chips are built from the conflict groups, so they only constrain that section.
+        const categorised = section.dataset.categorised === '1';
+        const rows = section.querySelectorAll('.group-row');
+        let shown = 0;
+        rows.forEach(row => {
+            const rowCategories = (row.dataset.categories || '').split(' ').filter(Boolean);
+            const okCategory = !categorised
+                || categories.length === 0
+                || categories.some(c => rowCategories.includes(c));
+            const okSearch = search === '' || (row.dataset.search || '').includes(search);
+            const visible = okCategory && okSearch;
 
-        row.style.display = visible ? '' : 'none';
-        // Always collapse the detail row when filtering, so a hidden row cannot leave an orphan open.
-        const detail = row.nextElementSibling;
-        if (detail && detail.classList.contains('group-detail')) {
-            detail.style.display = 'none';
-            const toggle = row.querySelector('.toggle');
-            if (toggle) toggle.textContent = '▸';
+            row.style.display = visible ? '' : 'none';
+            // Only hidden rows need collapsing: an open detail under a visible row is fine, and
+            // closing it would throw away the reader's place on every keystroke.
+            if (!visible) collapse(row);
+            if (visible) shown++;
+        });
+        if (rows.length) {
+            parts.push(shown + ' of ' + rows.length + ' ' + pluralise(rows.length, section.dataset.sectionLabel));
         }
-        if (visible) shown++;
     });
 
     const counter = document.getElementById('filter-count');
-    if (counter) {
-        counter.textContent = 'Showing ' + shown + ' of ' + rows.length + ' family groups';
-    }
+    if (counter) counter.textContent = parts.length ? 'Showing ' + parts.join(' · ') : '';
+}
+
+function applySort(mode) {
+    sections().forEach(section => {
+        const body = section.querySelector('tbody');
+        if (!body) return;
+        // Each group is two sibling rows. They have to move together, or a detail row ends up
+        // under the wrong family.
+        const pairs = Array.from(body.querySelectorAll('.group-row')).map(row => [row, row.nextElementSibling]);
+        pairs.sort((a, b) => mode === 'newest'
+            ? (Number(b[0].dataset.newestSg) || 0) - (Number(a[0].dataset.newestSg) || 0)
+            : (Number(a[0].dataset.order) || 0) - (Number(b[0].dataset.order) || 0));
+        pairs.forEach(([row, detail]) => {
+            body.appendChild(row);
+            if (detail && detail.classList.contains('group-detail')) body.appendChild(detail);
+        });
+    });
+}
+
+function toggleSort(btn) {
+    document.querySelectorAll('.sort-chip').forEach(c => c.classList.toggle('active', c === btn));
+    applySort(btn.dataset.sort);
 }
 
 document.addEventListener('DOMContentLoaded', applyFilters);

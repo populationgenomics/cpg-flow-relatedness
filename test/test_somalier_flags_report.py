@@ -20,6 +20,7 @@ from rd_qc.scripts.somalier_flags_report import (
     IMPACT_REFINEMENT,
     IMPACT_SAME_INDIVIDUAL,
     INLINE_FLAG_LIMIT,
+    MIN_GROUPS_FOR_FILTER_BAR,
     SgFlags,
     SGInfo,
     _extract_reads,
@@ -935,3 +936,74 @@ def test_the_same_individual_section_is_absent_when_there_is_nothing_in_it():
     html = render_fixture_html(only_refinement)
 
     assert 'Same individual' not in html
+
+
+# ---------------------------------------------------------------------------
+# Shared filter and sort bar
+# ---------------------------------------------------------------------------
+def test_every_section_is_filterable():
+    html = render_fixture_html()
+
+    # One data-section marker per rendered section, which is what the search iterates.
+    for section in ('conflicts', 'refinements', 'same-individual', 'resolved'):
+        assert f'data-section="{section}"' in html
+
+
+def test_only_the_conflicts_section_is_category_filtered():
+    # The chips are built from the conflict groups, so letting 'Sex inference' blank the whole
+    # refinements section would be surprising.
+    html = render_fixture_html()
+
+    assert html.count('data-categorised="1"') == 1
+
+
+def test_the_filter_bar_sits_above_every_section():
+    html = render_fixture_html()
+
+    # While the bar lived inside the conflicts section's `{% if conflict_groups %}` block, a
+    # dataset with no conflicts got no search box at all. Position proves it is out of that block.
+    assert html.index('id="search-input"') < html.index('Pedigree conflicts')
+
+
+def test_a_dataset_of_only_refinements_still_gets_a_filter_bar():
+    # The motivating case: no conflicts, but plenty to filter. The bar used to live inside the
+    # conflicts block, so this dataset got no search box at all.
+    many = [
+        pedigree_flag(
+            f'CPG{i:03d}',
+            f'CPG{i + 1:03d}',
+            f'FAM_R{i}',
+            expected=UNSPECIFIED_RELATED,
+            inferred='siblings',
+            relatedness=0.4873,
+            ibs0=341,
+        )
+        for i in range(1, MIN_GROUPS_FOR_FILTER_BAR + 3)
+    ]
+    groups = [{'id': f'CPG{i:03d}', 'meta': {'somalier_flags': [flag]}} for i, flag in enumerate(many, start=1)]
+    infos = {
+        f'CPG{i:03d}': SGInfo(
+            **{
+                **vars(MOCK_SG_INFOS['CPG004']),
+                'sg_id': f'CPG{i:03d}',
+                'family_external_id': f'FAM_R{i}',
+                'participant_external_id': f'PID_R{i}',
+            }
+        )
+        for i in range(1, MIN_GROUPS_FOR_FILTER_BAR + 4)
+    }
+    _, active, resolved, summary = run_pipeline(groups, infos)
+    html = render_report('mock', active, resolved, summary=summary, generated_at='2026-09-14T10:00:00+00:00')
+
+    assert summary['active_conflicts'] == 0
+    assert 'All clear' in html
+    assert 'id="search-input"' in html
+    assert 'data-section="refinements"' in html
+
+
+def test_rows_carry_the_sort_keys():
+    html = render_fixture_html()
+
+    assert 'data-newest-sg=' in html
+    assert 'data-order=' in html
+    assert 'Newest samples first' in html
