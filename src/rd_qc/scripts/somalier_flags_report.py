@@ -226,6 +226,8 @@ class FamilyGroup:
     counts: dict[str, int]
     count_summary: str
     search_blob: str
+    # Highest SG-ID rank in the group, so the page can sort newest samples first.
+    newest_sg_rank: int
 
     @property
     def total(self) -> int:
@@ -259,6 +261,21 @@ def _fmt_num(value: object) -> str:
         return str(int(num))
     text = f'{num:.2f}' if abs(num) >= 1 else f'{num:.2g}'
     return text.rstrip('0').rstrip('.') if '.' in text else text
+
+
+def _sg_id_rank(sg_id: str) -> int:
+    """
+    The integer part of a CPG ID, for sorting newest-first.
+
+    Must not be a string sort: real datasets carry both five- and six-digit IDs, so 'CPG99999'
+    sorts above 'CPG100000' lexicographically. An ID with no digits ranks 0, which puts it last
+    under the descending sort rather than raising.
+
+    Expects a single SG ID. A compound value like 'CPG123_CPG456' would concatenate to a
+    meaningless rank without any signal.
+    """
+    digits = ''.join(ch for ch in sg_id if ch.isdigit())
+    return int(digits) if digits else 0
 
 
 def _date_parts(value: str | None) -> tuple[str, str]:
@@ -742,6 +759,7 @@ def _build_group(key: str, label: str, rows: list[FlagRow], infos: dict[str, SGI
         counts=counts,
         count_summary=_count_summary(counts),
         search_blob=' '.join(part for part in search_parts if part),
+        newest_sg_rank=max((_sg_id_rank(sg_id) for sg_id in sg_ids), default=0),
     )
 
 

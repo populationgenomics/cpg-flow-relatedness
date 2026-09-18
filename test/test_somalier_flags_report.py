@@ -21,6 +21,7 @@ from rd_qc.scripts.somalier_flags_report import (
     SGInfo,
     _extract_reads,
     _fmt_num,
+    _sg_id_rank,
     collect_somalier_flags,
     flag_sg_key,
     group_by_family,
@@ -684,3 +685,23 @@ def test_a_read_with_no_size_or_date_renders_the_name_alone():
     r2_line = next(line for line in html.splitlines() if 'EXT_A_R2.fastq.gz' in line)
 
     assert 'read-meta' not in r2_line
+
+
+# ---------------------------------------------------------------------------
+# Sorting by newest sequencing group
+# ---------------------------------------------------------------------------
+def test_sg_id_rank_is_numeric_not_lexicographic():
+    # Real datasets carry both 5- and 6-digit IDs, so a string sort would put CPG99999 first.
+    assert _sg_id_rank('CPG100000') > _sg_id_rank('CPG99999')
+
+
+def test_sg_id_rank_of_an_unparseable_id_sorts_last():
+    # Descending sort puts 0 at the bottom, which is where a malformed ID belongs.
+    assert _sg_id_rank('not-an-sg') == 0
+
+
+def test_group_carries_the_rank_of_its_newest_sg():
+    _, active, _, _ = run_pipeline()
+
+    # FAM02's flags span CPG004, CPG005 and CPG010, so the newest is CPG010.
+    assert group_by_label(active)['FAM02'].newest_sg_rank == 10
