@@ -383,8 +383,10 @@
             pedigree leaves open, so they tell you the pedigree is incomplete rather than wrong. Nearly all
             of them read <em>no relationship provided</em>, meaning the pedigree places both people in the
             same family but records no path between them, which is what you get whenever a parent is missing
-            from the database. Each one is a candidate pedigree correction: if the measured relationship
-            looks right, the pedigree can be updated to say so.</p>
+            from the database. Some are candidate pedigree corrections, where the measured relationship
+            can simply be recorded. Others cannot be closed at all: a pedigree expresses relationships
+            only through parent links, so when the individual who would connect the pair is absent from
+            the database, there is no way to state the relationship until that record exists.</p>
         {{ family_table(refinement_groups, is_resolved=False) }}
     </div>
     {% endif %}

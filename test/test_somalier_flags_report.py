@@ -747,3 +747,13 @@ def test_the_bands_strip_names_the_first_degree_split():
 
     assert 'parent-child' in html
     assert 'full siblings' in html
+
+
+def test_the_refinements_blurb_admits_some_cannot_be_closed():
+    html = render_fixture_html()
+
+    # The old wording promised every refinement was a pedigree correction waiting to happen.
+    assert 'the pedigree can be updated to say so' not in html
+    # Matched within one line, since the template's prose is hard-wrapped.
+    assert 'cannot be closed at all' in html
+    assert 'only through parent links' in html
