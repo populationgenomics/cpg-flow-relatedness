@@ -280,9 +280,9 @@
                     <div class="reads-list">
                         {# One line per file, with the pair kept together as a block: real fastq
                            names run long enough that joining R1 and R2 was unreadable. #}
-                        {% for group in info.fastq_pairs %}
+                        {% for pair in info.fastq_pairs %}
                         <div class="read-group">
-                            {% for r in group %}{{ read_line(r) }}{% endfor %}
+                            {% for r in pair %}{{ read_line(r) }}{% endfor %}
                         </div>
                         {% endfor %}
                         {% if info.crams or info.other_reads %}
