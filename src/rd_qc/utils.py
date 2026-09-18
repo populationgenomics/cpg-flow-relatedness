@@ -263,6 +263,61 @@ THIRD_DEGREE_MIN_RELATEDNESS = 0.088
 PARENT_CHILD_MAX_IBS0_RATIO = 0.005
 
 
+@dataclass(frozen=True)
+class RelatednessBand:
+    """
+    One row of the report's relatedness legend. Display only.
+
+    `threshold` is built from the constants above so the legend cannot drift from what
+    `infer_degree` decides on. `label` and `examples` are hand-written: 'first-degree' has no
+    DEGREE_* constant of its own, because infer_degree splits that band into parent-child and
+    siblings on PARENT_CHILD_MAX_IBS0_RATIO, and no collaborator-friendly example list exists
+    anywhere upstream. `expected` is hand-written too, but safely: it is the theoretical 2*phi
+    anchor for each degree (1.0, 0.5, 0.25, 0.125, halving every step, per the comment above
+    IDENTICAL_MIN_RELATEDNESS), not an independently tunable value, so it cannot drift the way
+    a threshold can.
+    """
+
+    label: str
+    expected: str
+    threshold: str
+    examples: str
+
+
+RELATEDNESS_BANDS: tuple[RelatednessBand, ...] = (
+    RelatednessBand(
+        label=DEGREE_IDENTICAL,
+        expected='~1.0',
+        threshold=f'>= {IDENTICAL_MIN_RELATEDNESS}',
+        examples='same individual, duplicate sample, or identical twins',
+    ),
+    RelatednessBand(
+        label='first-degree',
+        expected='~0.5',
+        threshold=f'>= {FIRST_DEGREE_MIN_RELATEDNESS}',
+        examples='parent-child (ibs0 near 0) or full siblings',
+    ),
+    RelatednessBand(
+        label=DEGREE_SECOND,
+        expected='~0.25',
+        threshold=f'>= {SECOND_DEGREE_MIN_RELATEDNESS}',
+        examples='half-siblings, grandparent, aunt/uncle, niece/nephew',
+    ),
+    RelatednessBand(
+        label=DEGREE_THIRD,
+        expected='~0.125',
+        threshold=f'>= {THIRD_DEGREE_MIN_RELATEDNESS}',
+        examples='first cousins, great-grandparent',
+    ),
+    RelatednessBand(
+        label=DEGREE_UNRELATED,
+        expected='~0',
+        threshold=f'< {THIRD_DEGREE_MIN_RELATEDNESS}',
+        examples='no detectable relationship',
+    ),
+)
+
+
 def infer_degree(relatedness: float, ibs0: int, sites: int) -> str:
     """
     The relatedness degree the measurement supports, independent of any pedigree.

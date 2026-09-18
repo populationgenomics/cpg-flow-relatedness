@@ -27,6 +27,21 @@
         .card .value.grey { color: #636e72; }
         .card .sub { font-size: 0.75rem; color: #636e72; margin-top: 2px; min-height: 1em; }
 
+        /* Static key to the relatedness figures in every table below. Reads as a legend, not
+           as data, so it is one quiet strip rather than another row of cards. */
+        .bands { background: #fff; border-radius: 8px; padding: 12px 18px; margin-bottom: 10px;
+                 box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .bands .bands-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px;
+                              color: #636e72; margin-bottom: 8px; }
+        .bands-grid { display: grid; grid-template-columns: auto auto auto 1fr; gap: 3px 16px;
+                      align-items: baseline; }
+        .bands-grid .band-expected { font-size: 0.85rem; font-weight: 700; color: #2d3436;
+                                     font-family: ui-monospace, Menlo, Consolas, monospace; }
+        .bands-grid .band-label { font-size: 0.83rem; font-weight: 600; color: #1b6ca8; }
+        .bands-grid .band-threshold { font-size: 0.76rem; color: #b2bec3;
+                                      font-family: ui-monospace, Menlo, Consolas, monospace; }
+        .bands-grid .band-examples { font-size: 0.8rem; color: #636e72; }
+
         .all-clear { background: #e8f8f2; color: #0b8a63; border: 1px solid #b7e9d6;
                      border-radius: 8px; padding: 14px 18px; font-weight: 600; }
 
@@ -312,6 +327,22 @@
             <div class="label">Resolved</div>
             <div class="value grey">{{ summary.resolved_flags }}</div>
             <div class="sub">past incidents</div>
+        </div>
+    </div>
+
+    {# ------------------------------------------------------------------ #}
+    {# Static legend. Figures come from utils.RELATEDNESS_BANDS, which is #}
+    {# built from the same constants infer_degree decides on.             #}
+    {# ------------------------------------------------------------------ #}
+    <div class="bands">
+        <div class="bands-label">Relatedness bands</div>
+        <div class="bands-grid">
+            {% for band in relatedness_bands %}
+            <div class="band-expected">{{ band.expected }}</div>
+            <div class="band-label">{{ band.label }}</div>
+            <div class="band-threshold">{{ band.threshold }}</div>
+            <div class="band-examples">{{ band.examples }}</div>
+            {% endfor %}
         </div>
     </div>
 

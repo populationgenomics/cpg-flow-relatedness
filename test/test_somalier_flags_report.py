@@ -33,6 +33,11 @@ from rd_qc.scripts.somalier_flags_report import (
     summary_message_text,
 )
 from rd_qc.utils import (
+    FIRST_DEGREE_MIN_RELATEDNESS,
+    IDENTICAL_MIN_RELATEDNESS,
+    RELATEDNESS_BANDS,
+    SECOND_DEGREE_MIN_RELATEDNESS,
+    THIRD_DEGREE_MIN_RELATEDNESS,
     UNSPECIFIED_RELATED,
     SomalierRelatednessFlag,
     SomalierSelfRelatednessFlag,
@@ -575,10 +580,12 @@ def test_the_raw_relationship_is_still_searchable():
 def test_the_refinements_blurb_describes_the_case_that_actually_occurs():
     html = render_fixture_html()
 
-    # 'siblings' -> 'full siblings' is satisfied by EXPECTED_DEGREES now, so it never reaches the
-    # refinements section and must not be described as the common case.
-    assert 'full siblings' not in html
-    assert 'no relationship' in html.lower()
+    # 'siblings' -> 'full siblings' is satisfied by EXPECTED_DEGREES, so it never reaches the
+    # refinements section and must not be described there as the common case. Checked against the
+    # blurb alone, because the bands legend names 'full siblings' legitimately.
+    blurb = html.split('Pedigree refinements')[1].split('</p>')[0]
+    assert 'full siblings' not in blurb
+    assert 'no relationship' in blurb.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -705,3 +712,38 @@ def test_group_carries_the_rank_of_its_newest_sg():
 
     # FAM02's flags span CPG004, CPG005 and CPG010, so the newest is CPG010.
     assert group_by_label(active)['FAM02'].newest_sg_rank == 10
+
+
+# ---------------------------------------------------------------------------
+# Relatedness bands legend
+# ---------------------------------------------------------------------------
+def test_bands_are_derived_from_the_classifier_thresholds():
+    # The legend must quote the numbers infer_degree actually decides on, so a threshold change
+    # cannot leave the page describing bands the code no longer uses.
+    thresholds = {band.threshold for band in RELATEDNESS_BANDS}
+
+    assert f'>= {IDENTICAL_MIN_RELATEDNESS}' in thresholds
+    assert f'>= {FIRST_DEGREE_MIN_RELATEDNESS}' in thresholds
+    assert f'>= {SECOND_DEGREE_MIN_RELATEDNESS}' in thresholds
+    assert f'>= {THIRD_DEGREE_MIN_RELATEDNESS}' in thresholds
+    assert f'< {THIRD_DEGREE_MIN_RELATEDNESS}' in thresholds
+
+
+def test_every_band_renders_on_the_page():
+    html = render_fixture_html()
+
+    assert 'Relatedness bands' in html
+    for band in RELATEDNESS_BANDS:
+        assert band.label in html
+        assert band.expected in html
+        assert band.threshold in html
+        assert band.examples in html
+
+
+def test_the_bands_strip_names_the_first_degree_split():
+    # 'first-degree' has no DEGREE_* constant because infer_degree splits it on ibs0, so the
+    # legend has to spell out both relationships that land in the band.
+    html = render_fixture_html()
+
+    assert 'parent-child' in html
+    assert 'full siblings' in html

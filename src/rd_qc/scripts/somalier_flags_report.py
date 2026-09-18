@@ -22,6 +22,7 @@ from loguru import logger
 
 from rd_qc.utils import (
     NO_RELATIONSHIP_LABEL,
+    RELATEDNESS_BANDS,
     UNSPECIFIED_RELATED,
     VERDICT_REFINEMENT,
     SomalierFlag,
@@ -911,6 +912,7 @@ def render_report(
         refinement_groups=refinement_groups,
         resolved_groups=resolved_groups,
         summary=summary,
+        relatedness_bands=RELATEDNESS_BANDS,
         category_chips=chips,
         inline_flag_limit=INLINE_FLAG_LIMIT,
         show_filter_bar=len(chips) > 1 or len(active_groups) > MIN_GROUPS_FOR_FILTER_BAR,
