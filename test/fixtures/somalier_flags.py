@@ -13,6 +13,7 @@ Deliberately covers every branch the report's grouping logic has:
 - CPG001's sex flag, deliberately written without `sequencing_group_key`, so the report's
   derivation fallback for pre-existing flags gets exercised
 - CPG006 and CPG007, which have no flags at all, so `total_sgs` exceeds the flagged count
+- CPG014/CPG015, two sequencing groups of one participant, which the pedigree models as siblings
 
 Nothing here touches Metamist. `MOCK_SEQUENCING_GROUPS` mirrors DATASET_SGS_QUERY's response and
 `MOCK_SG_INFOS` mirrors what `get_sg_infos` would return, so a caller can skip both queries.
@@ -146,6 +147,21 @@ MOCK_FLAGS_BY_SG: dict[str, list[dict]] = {
             ibs0=341,
         ),
     ],
+    # FAM09: two sequencing groups for one person (PID_M). build_ped_content writes a PED row per
+    # SG, both with the same parents, so peddy calls them full siblings while the genotypes
+    # measure them as identical. Mirrors KDG0134PR in ghfm-kidgen.
+    'CPG014': [
+        pedigree_flag(
+            'CPG014',
+            'CPG015',
+            'FAM09',
+            expected='full siblings',
+            inferred='identical',
+            relatedness=0.9982,
+            ibs0=3,
+            ibs2=19871,
+        ),
+    ],
 }
 
 _SG_IDENTITIES = [
@@ -163,6 +179,9 @@ _SG_IDENTITIES = [
     ('CPG011', 'EXT_G2', 'PID_G', '', 'saliva'),
     ('CPG012', 'EXT_K', 'PID_K', 'FAM08', 'blood'),
     ('CPG013', 'EXT_L', 'PID_L', 'FAM08', 'blood'),
+    # Two SGs, one participant: the same-individual case.
+    ('CPG014', 'EXT_M1', 'PID_M', 'FAM09', 'blood'),
+    ('CPG015', 'EXT_M2', 'PID_M', 'FAM09', 'saliva'),
 ]
 
 MOCK_SG_INFOS: dict[str, SGInfo] = {

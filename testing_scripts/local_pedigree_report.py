@@ -472,7 +472,12 @@ def main() -> None:
     # 5. Render, exactly as the real report does.
     groups = group_by_family(flagged, infos)
     active_groups, resolved_groups = split_active_resolved(groups, infos)
-    summary = summarise_flags(flagged, total_sgs=len(sequencing_groups), families_affected=len(active_groups))
+    summary = summarise_flags(
+        flagged,
+        total_sgs=len(sequencing_groups),
+        families_affected=len(active_groups),
+        infos=infos,
+    )
 
     html = render_report(args.dataset, active_groups, resolved_groups, summary=summary)
     output.parent.mkdir(parents=True, exist_ok=True)

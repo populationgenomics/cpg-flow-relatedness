@@ -16,11 +16,16 @@ from fixtures.somalier_flags import (
 )
 
 from rd_qc.scripts.somalier_flags_report import (
+    IMPACT_CONFLICT,
+    IMPACT_REFINEMENT,
+    IMPACT_SAME_INDIVIDUAL,
     INLINE_FLAG_LIMIT,
     SgFlags,
     SGInfo,
     _extract_reads,
     _fmt_num,
+    _impact_of,
+    _is_same_individual,
     _sg_id_rank,
     collect_somalier_flags,
     flag_sg_key,
@@ -53,7 +58,7 @@ def run_pipeline(sequencing_groups=MOCK_SEQUENCING_GROUPS, infos=MOCK_SG_INFOS):
     flagged = [sf for sf in collect_somalier_flags(sequencing_groups) if sf.flags]
     groups = group_by_family(flagged, infos)
     active, resolved = split_active_resolved(groups, infos)
-    summary = summarise_flags(flagged, total_sgs=len(sequencing_groups), families_affected=len(active))
+    summary = summarise_flags(flagged, total_sgs=len(sequencing_groups), families_affected=len(active), infos=infos)
     return flagged, active, resolved, summary
 
 
@@ -157,9 +162,11 @@ def test_cross_family_flag_is_counted_once_despite_appearing_twice():
 
     rendered_rows = sum(len(group.flags) for group in active)
 
-    # Eight rows on the page, but only seven distinct flags: the cross-family pair is shown twice.
-    assert rendered_rows == 8
-    assert summary['active_flags'] == 7
+    # Nine rows across the active groups, but only eight distinct flags: the cross-family pair is
+    # shown twice. FAM09's same-individual pair is one of the nine, since this counts active
+    # groups before the impact split.
+    assert rendered_rows == 9
+    assert summary['active_flags'] == 8
 
 
 def test_same_family_pedigree_flag_lands_in_one_group_only():
@@ -238,17 +245,35 @@ def test_summary_counts():
     _, active, _, summary = run_pipeline()
 
     assert summary == {
-        'total_sgs': 13,
-        'active_flags': 7,
-        'active_by_category': {'sex': 2, 'self': 2, 'pedigree': 3},
-        # Six of the seven are real disagreements; FAM08's siblings/full-siblings pair is not.
-        # That one is a pedigree flag, so pedigree drops to 2 once refinements come out.
+        'total_sgs': 15,
+        'active_flags': 8,
+        'active_by_category': {'sex': 2, 'self': 2, 'pedigree': 4},
+        # Six of the eight are real disagreements. FAM08's 'no relationship provided' pair is a
+        # refinement, and FAM09's pair is two SGs of one person, so pedigree drops to 2 once both
+        # come out.
         'active_conflicts_by_category': {'sex': 2, 'self': 2, 'pedigree': 2},
         'active_conflicts': 6,
         'active_refinements': 1,
+        'active_same_individual': 1,
+        # Counts families with any active flag, refinement- and same-individual-only included,
+        # which is why it tracks len(active) rather than the conflict count.
         'families_affected': len(active),
         'resolved_flags': 2,
     }
+
+
+def test_every_flag_classifies_into_one_of_the_three_impacts():
+    # Fails the moment _impact_of grows a fourth return value, fixture or no fixture, which is
+    # what stops active_flags from silently exceeding the sum of its parts.
+    flagged, _, _, _ = run_pipeline()
+
+    # The complete lookup, not one rebuilt from the active groups: this classifies every flag
+    # including resolved ones, whose SGs need not be referenced by any active flag.
+    produced = {_impact_of(flag, MOCK_SG_INFOS) for sf in flagged for flag in sf.flags}
+
+    assert produced <= {IMPACT_CONFLICT, IMPACT_REFINEMENT, IMPACT_SAME_INDIVIDUAL}
+    # And the fixture really does exercise all three, so the subset check is not vacuous.
+    assert produced == {IMPACT_CONFLICT, IMPACT_REFINEMENT, IMPACT_SAME_INDIVIDUAL}
 
 
 # ---------------------------------------------------------------------------
@@ -332,19 +357,26 @@ def test_resolved_section_is_absent_when_there_is_nothing_resolved():
 def test_inline_flag_lines_are_capped_with_a_more_link():
     # A real family can carry 50+ pedigree mismatches; rendering them all inline buries the rest.
     many = [
-        pedigree_flag(f'CPG{i:03d}', f'CPG{i + 1:03d}', 'FAM09', expected='unrelated', inferred='full siblings')
+        pedigree_flag(f'CPG{i:03d}', f'CPG{i + 1:03d}', 'FAM_MANY', expected='unrelated', inferred='full siblings')
         for i in range(1, INLINE_FLAG_LIMIT + 4)
     ]
     groups = [{'id': 'CPG001', 'meta': {'somalier_flags': many}}]
     infos = {
         f'CPG{i:03d}': SGInfo(
-            **{**vars(MOCK_SG_INFOS['CPG004']), 'sg_id': f'CPG{i:03d}', 'family_external_id': 'FAM09'}
+            **{
+                **vars(MOCK_SG_INFOS['CPG004']),
+                'sg_id': f'CPG{i:03d}',
+                'family_external_id': 'FAM_MANY',
+                # Distinct participants: these are meant to be many separate mismatched pairs, not
+                # the same-individual case _is_same_individual detects.
+                'participant_external_id': f'PID_{i:03d}',
+            }
         )
         for i in range(1, INLINE_FLAG_LIMIT + 5)
     }
     flagged = [sf for sf in collect_somalier_flags(groups) if sf.flags]
     active, resolved = split_active_resolved(group_by_family(flagged, infos), infos)
-    summary = summarise_flags(flagged, total_sgs=1, families_affected=len(active))
+    summary = summarise_flags(flagged, total_sgs=1, families_affected=len(active), infos=infos)
     html = render_report('mock', active, resolved, summary=summary, generated_at='2026-09-14T10:00:00+00:00')
 
     assert active[0].total == INLINE_FLAG_LIMIT + 3
@@ -356,13 +388,14 @@ def test_inline_flag_lines_are_capped_with_a_more_link():
 def test_split_by_impact_separates_conflicts_from_refinements():
     _, active, _, _ = run_pipeline()
 
-    conflicts, refinements = split_by_impact(active, {info.sg_id: info for g in active for info in g.sg_infos})
+    conflicts, refinements, _ = split_by_impact(active, {info.sg_id: info for g in active for info in g.sg_infos})
 
-    # FAM08's only flag is siblings -> full siblings, so it appears solely in the refinements side.
+    # FAM08's only flag is 'no relationship provided' -> siblings, so it appears solely in the
+    # refinements side.
     assert 'FAM08' not in group_by_label(conflicts)
     assert 'FAM08' in group_by_label(refinements)
-    assert all(f.impact == 'conflict' for g in conflicts for f in g.flags)
-    assert all(f.impact == 'refinement' for g in refinements for f in g.flags)
+    assert all(f.impact == IMPACT_CONFLICT for g in conflicts for f in g.flags)
+    assert all(f.impact == IMPACT_REFINEMENT for g in refinements for f in g.flags)
 
 
 def test_refinements_render_in_their_own_section_with_the_explanation():
@@ -421,10 +454,10 @@ def test_message_counts_conflicts_not_total_flags():
 
     text = message_for(summary)
 
-    # 7 active flags, but only 6 are conflicts. The headline must not claim 7.
+    # 8 active flags, but only 6 are conflicts. The headline must not claim 8.
     assert '*6 active conflicts*' in text
     assert f'{len(active)} families' in text
-    assert '7 active conflicts' not in text
+    assert '8 active conflicts' not in text
 
 
 def test_message_breaks_conflicts_down_by_category():
@@ -432,7 +465,8 @@ def test_message_breaks_conflicts_down_by_category():
 
     text = message_for(summary)
 
-    # The one refinement is a pedigree flag, so pedigree reads 2 here and not 3.
+    # The refinement and the same-individual pair are both pedigree flags, so pedigree reads 2
+    # here and not 4.
     assert ' - Sex inference: 2' in text
     assert ' - Self-relatedness: 2' in text
     assert ' - Pedigree relatedness: 2' in text
@@ -488,7 +522,7 @@ def test_message_reports_what_is_new_since_the_previous_report():
     _, _, _, summary = run_pipeline()
     previous = previous_report(
         {
-            'total_sgs': 11,
+            'total_sgs': 13,
             'active_conflicts': 4,
             'active_refinements': 0,
             'families_affected': summary['families_affected'] - 1,
@@ -757,3 +791,147 @@ def test_the_refinements_blurb_admits_some_cannot_be_closed():
     # Matched within one line, since the template's prose is hard-wrapped.
     assert 'cannot be closed at all' in html
     assert 'only through parent links' in html
+
+
+# ---------------------------------------------------------------------------
+# Same individual, multiple sequencing groups
+# ---------------------------------------------------------------------------
+def test_a_pair_of_sgs_from_one_participant_is_not_a_conflict():
+    _, active, _, _ = run_pipeline()
+    infos = {info.sg_id: info for g in active for info in g.sg_infos}
+
+    conflicts, refinements, same_individual = split_by_impact(active, infos)
+
+    assert 'FAM09' not in group_by_label(conflicts)
+    assert 'FAM09' not in group_by_label(refinements)
+    assert 'FAM09' in group_by_label(same_individual)
+    # FAM02 carries real conflicts, so an implementation that swept everything into the
+    # same-individual bucket would fail here.
+    assert 'FAM02' in group_by_label(conflicts)
+
+
+def test_two_sgs_from_one_participant_are_the_same_individual():
+    flag = next(
+        f
+        for sf in collect_somalier_flags(MOCK_SEQUENCING_GROUPS)
+        for f in sf.flags
+        if getattr(f, 'sg_id_1', None) == 'CPG014'
+    )
+
+    assert _is_same_individual(flag, MOCK_SG_INFOS)
+
+
+def test_one_resolvable_participant_and_one_missing_is_not_the_same_individual():
+    # Asymmetric: CPG014 resolves to PID_M, CPG999 resolves to ''. A set-based rewrite of the
+    # guard would behave correctly on the both-empty case and wrongly here.
+    flag = SomalierRelatednessFlag(
+        category='relatedness_mismatch',
+        sg_id_1='CPG014',
+        sg_id_2='CPG999',
+        family_external_id='FAM09',
+        expected_relationship='full siblings',
+        inferred_relationship='identical',
+        relatedness=0.998,
+        ibs0=3,
+        ibs2=19871,
+    )
+
+    assert not _is_same_individual(flag, MOCK_SG_INFOS)
+
+
+def test_a_same_participant_pair_that_measures_unrelated_stays_a_conflict():
+    # One participant, two SGs, but the genotypes disagree: a real sample mix-up, not the
+    # two-rows-for-one-person artefact. Reclassifying it would hide the finding.
+    flag = SomalierRelatednessFlag(
+        category='relatedness_mismatch',
+        sg_id_1='CPG014',
+        sg_id_2='CPG015',
+        family_external_id='FAM09',
+        expected_relationship='full siblings',
+        inferred_relationship='unrelated',
+        relatedness=0.01,
+        ibs0=9000,
+        ibs2=1200,
+    )
+
+    assert not _is_same_individual(flag, MOCK_SG_INFOS)
+
+
+def test_a_self_relatedness_flag_is_never_the_same_individual():
+    # Both members are the same participant by definition, so if this class ever became a subclass
+    # of SomalierRelatednessFlag every self-relatedness failure would be reclassified and vanish
+    # from the conflicts section. The isinstance guard is what prevents that; pin it.
+    flag = SomalierSelfRelatednessFlag(
+        category='self_relatedness_mismatch',
+        sg_id_1='CPG002',
+        sg_id_2='CPG003',
+        participant_external_id='PID_B',
+        threshold=0.9,
+        relatedness=0.61,
+        ibs0=1204,
+        ibs2=18337,
+    )
+
+    assert not _is_same_individual(flag, MOCK_SG_INFOS)
+
+
+def test_two_sgs_with_no_resolvable_participant_are_not_the_same_individual():
+    # Both participants resolve to '', which must not match each other.
+    flag = SomalierRelatednessFlag(
+        category='relatedness_mismatch',
+        sg_id_1='CPG900',
+        sg_id_2='CPG901',
+        family_external_id='FAM99',
+        expected_relationship='full siblings',
+        inferred_relationship='identical',
+        relatedness=0.998,
+        ibs0=3,
+        ibs2=19871,
+    )
+
+    assert not _is_same_individual(flag, {})
+
+
+def test_a_sex_flag_is_never_the_same_individual():
+    # Only a pairwise pedigree flag can be one, and a sex flag has no second member.
+    flag = SomalierSexInferenceFlag(
+        category='sex_inference_mismatch',
+        provided='female',
+        inferred='male',
+        mean_depth=31.4,
+        x_het_ratio=0.016,
+        x_depth_ratio=1.02,
+        y_depth_ratio=0.98,
+        x_sites=4821,
+        p_middling_ab=0.012,
+    )
+
+    assert not _is_same_individual(flag, MOCK_SG_INFOS)
+
+
+def test_the_same_individual_section_renders_with_its_explanation():
+    html = render_fixture_html()
+
+    assert 'Same individual' in html
+    # Explains why the pedigree models one person's two SGs as siblings.
+    assert 'two pedigree rows' in html
+
+
+def test_the_same_individual_pair_is_absent_from_the_conflicts_section():
+    html = render_fixture_html()
+
+    conflicts_section = html.split('Pedigree conflicts')[1].split('Pedigree refinements')[0]
+    same_individual_section = html.split('Same individual')[1].split('Resolved &mdash; past incidents')[0]
+
+    assert 'PID_M' not in conflicts_section
+    # Not merely absent from conflicts: it has to turn up in the new section. Asserting both ties
+    # the extraction to the relocation, so a bug that dropped the pair entirely would still fail.
+    assert 'CPG014' in same_individual_section
+    assert 'FAM09' in same_individual_section
+
+
+def test_the_same_individual_section_is_absent_when_there_is_nothing_in_it():
+    only_refinement = [{'id': 'CPG012', 'meta': MOCK_SEQUENCING_GROUPS[11]['meta']}]
+    html = render_fixture_html(only_refinement)
+
+    assert 'Same individual' not in html

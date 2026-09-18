@@ -16,11 +16,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
+from typing import Final, Literal
 
 import jinja2
 from loguru import logger
 
 from rd_qc.utils import (
+    DEGREE_IDENTICAL,
     NO_RELATIONSHIP_LABEL,
     RELATEDNESS_BANDS,
     UNSPECIFIED_RELATED,
@@ -77,6 +79,18 @@ MIN_GROUPS_FOR_FILTER_BAR = 5
 # How many flag lines a family group shows inline before collapsing the rest behind its expand.
 # A single family can carry 50+ pedigree mismatches, which inline would bury every other family.
 INLINE_FLAG_LIMIT = 5
+
+# How a flag is treated on the page. 'conflict' is a genuine disagreement, 'refinement' is a
+# pedigree that is merely less specific than the genotypes, and 'same_individual' is the artefact
+# of one person having two sequencing groups: build_ped_content writes a PED row per SG, so the
+# pedigree models the pair as siblings and relatedness ~1.0 is the expected result.
+#
+# Typed as a Literal, not just str, so a fourth impact value fails at type-check time rather than
+# silently unbalancing the summary counts that assume exactly these three.
+Impact = Literal['conflict', 'refinement', 'same_individual']
+IMPACT_CONFLICT: Final[Impact] = 'conflict'
+IMPACT_REFINEMENT: Final[Impact] = 'refinement'
+IMPACT_SAME_INDIVIDUAL: Final[Impact] = 'same_individual'
 
 DATASET_SGS_QUERY = gql(
     """
@@ -191,10 +205,13 @@ class FlagRow:
     category_label: str
     identity: tuple
     sg_key: str
-    # 'conflict' when the pedigree and the genotypes disagree, 'refinement' when the pedigree is
-    # merely less specific. Refinements get their own de-emphasised section, because they
-    # outnumber conflicts on real datasets and bury them.
-    impact: str
+    # Which of the three mutually exclusive sections this row renders in: a section routing key,
+    # not a severity. 'conflict' when the pedigree and the genotypes disagree, 'refinement' when
+    # the pedigree is merely less specific (refinements outnumber conflicts on real datasets and
+    # bury them, hence their own de-emphasised section), and 'same_individual' when the pair is
+    # two sequencing groups of one person rather than a pedigree-vs-genotype question at all —
+    # a statement about data provenance, not about agreement.
+    impact: Impact
     # Compact identity for the inline glance line.
     subject: str
     subject_detail: str
@@ -535,6 +552,56 @@ def _participant_of(sg_id: str, infos: dict[str, SGInfo]) -> str:
     return (info.participant_external_id if info else '') or ''
 
 
+def _is_same_individual(flag: SomalierFlag, infos: dict[str, SGInfo]) -> bool:
+    """
+    Whether a pedigree flag is really two sequencing groups of one person.
+
+    The pedigree has no way to model one individual with two sequencing groups, so
+    build_ped_content gives each SG its own row with the same parents and peddy relates them as
+    siblings. Nothing is lost by taking these off the conflicts list: every participant with two
+    or more SGs already gets a SomalierSelfCheck, which flags the pair when relatedness falls
+    below threshold, so measuring them as identical is that check passing.
+
+    Reclassification requires the registry and the genotypes to agree that this is one person, so
+    the only thing that can ever be reclassified is the artefact itself. Matching on participant ID
+    alone would also swallow a real sample mix-up: a duplicated external ID, a mis-registered
+    sample, or a swap at accessioning can all put two SGs under one participant while the
+    genotypes disagree. A same-participant pair that measures anything other than identical is a
+    genuine finding and must stay a conflict.
+
+    The non-empty guard matters too. Two SGs that both failed participant resolution would
+    otherwise match each other on ''.
+    """
+    if not isinstance(flag, SomalierRelatednessFlag):
+        return False
+    participant = _participant_of(flag.sg_id_1, infos)
+    return (
+        bool(participant)
+        and participant == _participant_of(flag.sg_id_2, infos)
+        and flag.inferred_relationship == DEGREE_IDENTICAL
+    )
+
+
+def _is_refinement(flag: SomalierFlag) -> bool:
+    """Whether a flag is a pedigree refinement rather than a genuine disagreement."""
+    return isinstance(flag, SomalierRelatednessFlag) and flag.verdict == VERDICT_REFINEMENT
+
+
+def _impact_of(flag: SomalierFlag, infos: dict[str, SGInfo]) -> Impact:
+    """
+    Which section a flag belongs in.
+
+    Same-individual is tested first: such a pair is recorded as a conflict today and would be
+    regardless of its verdict, so the artefact check has to win. Shared with `summarise_flags` so
+    the header cards and the rendered sections cannot disagree about what a flag is.
+    """
+    if _is_same_individual(flag, infos):
+        return IMPACT_SAME_INDIVIDUAL
+    if _is_refinement(flag):
+        return IMPACT_REFINEMENT
+    return IMPACT_CONFLICT
+
+
 def _group_targets(flag: SomalierFlag, owning_sg_id: str, infos: dict[str, SGInfo]) -> list[tuple[str, str]]:
     """
     The one or two family groups this flag belongs in.
@@ -683,11 +750,7 @@ def _flag_to_row(
     resolution_short, resolution_full = _date_parts(flag.resolution_date)
     sg_key = flag_sg_key(flag, owning_sg_id)
 
-    # Only pedigree flags can be refinements, and they carry their own verdict from the check. A
-    # sex mismatch or a failed self-relatedness check is always a genuine disagreement. Flags
-    # recorded before `verdict` existed have an empty string, and fall back to conflict so nothing
-    # old is silently de-emphasised.
-    refinement = isinstance(flag, SomalierRelatednessFlag) and flag.verdict == VERDICT_REFINEMENT
+    impact = _impact_of(flag, infos)
 
     return FlagRow(
         category=flag.category or '',
@@ -695,7 +758,7 @@ def _flag_to_row(
         category_label=CATEGORY_LABELS.get(category_key, category_key),
         identity=flag_identity(flag, sg_key),
         sg_key=sg_key,
-        impact='refinement' if refinement else 'conflict',
+        impact=impact,
         subject=parts['subject'],
         subject_detail=parts['subject_detail'],
         members=parts['members'],
@@ -818,34 +881,43 @@ def split_active_resolved(
 def split_by_impact(
     groups: list[FamilyGroup],
     infos: dict[str, SGInfo],
-) -> tuple[list[FamilyGroup], list[FamilyGroup]]:
+) -> tuple[list[FamilyGroup], list[FamilyGroup], list[FamilyGroup]]:
     """
-    Split the active groups into (conflicts, refinements).
+    Split the active groups into (conflicts, refinements, same-individual).
 
     Refinements are where the recorded pedigree is simply less specific than the genotypes. They
     typically outnumber conflicts, so mixing them in hides the real findings. The split is assigned
     by utils.relatedness_verdict.
+
+    Same-individual pairs are two sequencing groups of one person, which the pedigree can only
+    model as siblings. See `_is_same_individual`.
     """
     return (
-        _rebuild_subset(groups, infos, lambda row: row.impact == 'conflict'),
-        _rebuild_subset(groups, infos, lambda row: row.impact == 'refinement'),
+        _rebuild_subset(groups, infos, lambda row: row.impact == IMPACT_CONFLICT),
+        _rebuild_subset(groups, infos, lambda row: row.impact == IMPACT_REFINEMENT),
+        _rebuild_subset(groups, infos, lambda row: row.impact == IMPACT_SAME_INDIVIDUAL),
     )
 
 
 # ---------------------------------------------------------------------------
 # Summary and filter chips
 # ---------------------------------------------------------------------------
-def _is_refinement(flag: SomalierFlag) -> bool:
-    """Whether a flag is a pedigree refinement rather than a genuine disagreement."""
-    return isinstance(flag, SomalierRelatednessFlag) and flag.verdict == VERDICT_REFINEMENT
-
-
-def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: int) -> dict:
+def summarise_flags(
+    sg_flags: list[SgFlags],
+    total_sgs: int,
+    families_affected: int,
+    infos: dict[str, SGInfo],
+) -> dict:
     """
     Dataset-wide, flag-centric counts for the header cards.
 
     Deduplicates on flag identity before counting. Flags are currently recorded against one SG of a
     pair only, so nothing is duplicated today, but this keeps the counts right if that ever changes.
+
+    Buckets through `_impact_of`, the same helper the rendered sections use, so a card cannot
+    classify a flag differently from the table beneath it. Counts can still differ: a cross-family
+    pair is rendered under both families and counted once. `infos` is needed because
+    same-individual detection resolves both members of a pair to their participant.
     """
     unique: dict[tuple, SomalierFlag] = {}
     for sf in sg_flags:
@@ -854,7 +926,12 @@ def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: 
 
     all_flags = list(unique.values())
     active = [f for f in all_flags if not f.resolved]
-    conflicts = [f for f in active if not _is_refinement(f)]
+    # One _impact_of call per flag, then partition. Exhaustive by construction: every active flag
+    # lands in exactly one of the three.
+    impacts = [(_impact_of(flag, infos), flag) for flag in active]
+    conflicts = [flag for impact, flag in impacts if impact == IMPACT_CONFLICT]
+    refinements = [flag for impact, flag in impacts if impact == IMPACT_REFINEMENT]
+    same_individual = [flag for impact, flag in impacts if impact == IMPACT_SAME_INDIVIDUAL]
 
     return {
         'total_sgs': total_sgs,
@@ -866,7 +943,8 @@ def summarise_flags(sg_flags: list[SgFlags], total_sgs: int, families_affected: 
             key: sum(1 for f in conflicts if category_key_of(f) == key) for key in CATEGORY_ORDER
         },
         'active_conflicts': len(conflicts),
-        'active_refinements': len(active) - len(conflicts),
+        'active_refinements': len(refinements),
+        'active_same_individual': len(same_individual),
         'families_affected': families_affected,
         'resolved_flags': sum(1 for f in all_flags if f.resolved),
     }
@@ -903,13 +981,16 @@ def render_report(
         autoescape=jinja2.select_autoescape(['html', 'xml']),
     )
     template = env.get_template('somalier_flags_overview.html.jinja')
-    conflict_groups, refinement_groups = split_by_impact(active_groups, _infos_of(active_groups))
+    conflict_groups, refinement_groups, same_individual_groups = split_by_impact(
+        active_groups, _infos_of(active_groups)
+    )
     chips = category_chips(conflict_groups)
     return template.render(
         dataset=dataset,
         generated_at=generated_at or datetime.now(tz=UTC).isoformat(timespec='seconds'),
         conflict_groups=conflict_groups,
         refinement_groups=refinement_groups,
+        same_individual_groups=same_individual_groups,
         resolved_groups=resolved_groups,
         summary=summary,
         relatedness_bands=RELATEDNESS_BANDS,
@@ -1063,7 +1144,12 @@ def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: 
 
     groups = group_by_family(flagged, infos)
     active_groups, resolved_groups = split_active_resolved(groups, infos)
-    summary = summarise_flags(flagged, total_sgs=len(sequencing_groups), families_affected=len(active_groups))
+    summary = summarise_flags(
+        flagged,
+        total_sgs=len(sequencing_groups),
+        families_affected=len(active_groups),
+        infos=infos,
+    )
 
     logger.info(
         f'{logging_prefix} :: Rendering {summary["active_flags"]} active flag(s) across '

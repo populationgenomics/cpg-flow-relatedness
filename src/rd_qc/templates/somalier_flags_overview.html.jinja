@@ -147,11 +147,16 @@
         .reads-list .read-meta { color: #74838d; white-space: nowrap; margin-left: 6px;
                                  font-size: 0.75rem; }
 
-        /* Refinements and resolved flags are both de-emphasised: neither needs a decision. */
-        .refinement-section table, .resolved-section table { opacity: 0.72; }
-        .refinement-section h2, .resolved-section h2 { color: #636e72; }
-        .refinement-section .flag-line { border-left-color: #b2bec3; }
-        .refinement-section .blurb { margin: -4px 0 12px; }
+        /* Refinements, same-individual pairs and resolved flags are all de-emphasised: none of
+           them needs a decision. */
+        .refinement-section table, .resolved-section table,
+        .same-individual-section table { opacity: 0.72; }
+        .refinement-section h2, .resolved-section h2,
+        .same-individual-section h2 { color: #636e72; }
+        .refinement-section .flag-line,
+        .same-individual-section .flag-line { border-left-color: #b2bec3; }
+        .refinement-section .blurb,
+        .same-individual-section .blurb { margin: -4px 0 12px; }
     </style>
 </head>
 <body>
@@ -308,8 +313,8 @@
             <div class="value {{ 'red' if summary.active_conflicts else 'grey' }}">{{ summary.active_conflicts }}</div>
             <div class="sub">
                 {%- set parts = [] -%}
-                {%- if summary.active_by_category.sex %}{% set _ = parts.append(summary.active_by_category.sex ~ ' sex') %}{% endif -%}
-                {%- if summary.active_by_category.self %}{% set _ = parts.append(summary.active_by_category.self ~ ' self') %}{% endif -%}
+                {%- if summary.active_conflicts_by_category.sex %}{% set _ = parts.append(summary.active_conflicts_by_category.sex ~ ' sex') %}{% endif -%}
+                {%- if summary.active_conflicts_by_category.self %}{% set _ = parts.append(summary.active_conflicts_by_category.self ~ ' self') %}{% endif -%}
                 {{ parts | join(' &middot; ') ~ ' &middot; rest pedigree' if parts else 'need a decision' if summary.active_conflicts else 'none outstanding' }}
             </div>
         </div>
@@ -321,7 +326,7 @@
         <div class="card">
             <div class="label">Families affected</div>
             <div class="value {{ 'red' if summary.families_affected else 'grey' }}">{{ summary.families_affected }}</div>
-            <div class="sub">{{ 'includes participant-level groups' if summary.families_affected else '' }}</div>
+            <div class="sub">{{ 'includes refinement- and participant-only groups' if summary.families_affected else '' }}</div>
         </div>
         <div class="card">
             <div class="label">Resolved</div>
@@ -392,7 +397,27 @@
     {% endif %}
 
     {# ------------------------------------------------------------------ #}
-    {# Section 3: resolved flags (past incidents backlog)                 #}
+    {# Section 3: one person with two sequencing groups, which a pedigree #}
+    {# cannot model, so it is not a finding at all.                       #}
+    {# ------------------------------------------------------------------ #}
+    {% if same_individual_groups %}
+    <div class="same-individual-section">
+        {# U+2261 'identical to', which is what these pairs measure. Chosen over a more pictorial #}
+        {# glyph because Mathematical Operators has the same near-universal font coverage as the #}
+        {# other three headings' glyphs, and a heading is a bad place for a missing-glyph box. #}
+        <h2>&#8801; Same individual &mdash; multiple sequencing groups <span class="count">{{ same_individual_groups | length }} group{{ '' if same_individual_groups | length == 1 else 's' }}</span></h2>
+        <p class="blurb">Not findings. A pedigree has no way to record one person with two sequencing
+            groups, so each group gets its own row and both carry the same parents &mdash; which makes the
+            pedigree describe the pair as siblings. With two pedigree rows for one person, relatedness
+            near 1.0 is the expected result, not a mismatch. Whether the two groups really are the same
+            person is checked separately: if that check fails, it appears above tagged
+            <em>Self-relatedness</em> rather than here.</p>
+        {{ family_table(same_individual_groups, is_resolved=False) }}
+    </div>
+    {% endif %}
+
+    {# ------------------------------------------------------------------ #}
+    {# Section 4: resolved flags (past incidents backlog)                 #}
     {# ------------------------------------------------------------------ #}
     {% if resolved_groups %}
     <div class="resolved-section">

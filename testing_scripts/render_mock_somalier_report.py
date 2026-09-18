@@ -55,6 +55,7 @@ def build_html(
         flagged,
         total_sgs=len(sequencing_groups),
         families_affected=len(active_groups),
+        infos=infos,
     )
     html = render_report(
         DATASET,
