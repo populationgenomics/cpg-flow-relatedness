@@ -7,8 +7,6 @@ the only grouping under which a pedigree mismatch and a sex mismatch on the same
 side by side. A pedigree pair that straddles two families is rendered under both of them (the
 classic cross-family sample swap, which both families' reviewers need to see) but counted once,
 via the per-flag identity key.
-
-See docs/superpowers/specs/2026-09-14-somalier-relatedness-report-design.md.
 """
 
 from argparse import ArgumentParser
