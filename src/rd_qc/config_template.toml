@@ -2,14 +2,17 @@
 
 input_cohorts = []
 sequencing_type = 'genome'
-
+sequencing_technology = 'short-read'
 status_reporter = 'metamist'
 
 [somalier_self_check]
-kinship_threshold = 0.9
+relatedness_threshold = 0.9
 send_to_slack = true
 
 [somalier_pedigree]
+send_to_slack = false  # Pedigree issues are sent to slack via the flags report
+
+[somalier_flags_report]
 send_to_slack = true
 
 [somalier_extract]
