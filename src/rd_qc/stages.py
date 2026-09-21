@@ -185,9 +185,12 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         index = get_project_sgs_and_fingerprints(dataset.name, filter_sgs=True)
         somalier_paths = {sg_id: info.somalier_path for sg_id, info in index.by_sg.items()}
 
-        somalier_self_relatedness_json_paths = [
-            path for path in inputs.as_dict(dataset, SomalierSelfCheck).values() if str(path).endswith('.json')
-        ]
+        try:
+            somalier_self_relatedness_json_paths = [
+                path for path in inputs.as_dict(dataset, SomalierSelfCheck).values() if str(path).endswith('.json')
+            ]
+        except stage.StageInputNotFoundError:
+            somalier_self_relatedness_json_paths = []
 
         # Build PED file content and write to GCS at orchestration time
         ped_content = build_ped_content(dataset.name, index)
