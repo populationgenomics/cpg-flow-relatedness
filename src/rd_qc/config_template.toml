@@ -10,7 +10,7 @@ relatedness_threshold = 0.9
 send_to_slack = true
 
 [somalier_pedigree]
-send_to_slack = true
+send_to_slack = false  # Pedigree issues are sent to slack via the flags report
 
 [somalier_flags_report]
 send_to_slack = true
