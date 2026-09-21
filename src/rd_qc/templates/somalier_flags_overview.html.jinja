@@ -404,14 +404,8 @@
     {% if refinement_groups %}
     <div class="refinement-section">
         <h2>&#8505; Pedigree refinements <span class="count">{{ refinement_groups | length }} group{{ '' if refinement_groups | length == 1 else 's' }}</span></h2>
-        <p class="blurb">These are not disagreements. The genotypes name a relationship that the recorded
-            pedigree leaves open, so they tell you the pedigree is incomplete rather than wrong. Nearly all
-            of them read <em>no relationship provided</em>, meaning the pedigree places both people in the
-            same family but records no path between them, which is what you get whenever a parent is missing
-            from the database. Some are candidate pedigree corrections, where the measured relationship
-            can simply be recorded. Others cannot be closed at all: a pedigree expresses relationships
-            only through parent links, so when the individual who would connect the pair is absent from
-            the database, there is no way to state the relationship until that record exists.</p>
+        <p class="blurb">The following flags <em>may</em> be resolved by an updated pedigree, but are likely
+            unimpactful if left unresolved.</p>
         <div data-section="refinements" data-section-label="refinement groups">
             {{ family_table(refinement_groups, is_resolved=False) }}
         </div>
@@ -428,10 +422,8 @@
         {# glyph because Mathematical Operators has the same near-universal font coverage as the #}
         {# other three headings' glyphs, and a heading is a bad place for a missing-glyph box. #}
         <h2>&#8801; Same individual &mdash; multiple sequencing groups <span class="count">{{ same_individual_groups | length }} group{{ '' if same_individual_groups | length == 1 else 's' }}</span></h2>
-        <p class="blurb">Not findings. A pedigree has no way to record one person with two sequencing
-            groups, so each group gets its own row and both carry the same parents &mdash; which makes the
-            pedigree describe the pair as siblings. With two pedigree rows for one person, relatedness
-            near 1.0 is the expected result, not a mismatch. Whether the two groups really are the same
+        <p class="blurb">Uncommon cases there are multiple active samples / sequencing groups
+            for the same participant. Whether the two groups really are the same
             person is checked separately: if that check fails, it appears above tagged
             <em>Self-relatedness</em> rather than here.</p>
         <div data-section="same-individual" data-section-label="same-individual groups">
