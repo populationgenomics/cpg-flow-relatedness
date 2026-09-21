@@ -194,7 +194,7 @@ def record_somalier_flags_job(
     somalier_self_relatedness_jsons = batch_instance.read_input(file_list_path)
 
     # And handle the case where there are no self-relatedness JSON files for the SGs
-    if file_list_path.stat().st_size == 0:
+    if len(somalier_self_relatedness_json_paths) == 0:
         cmd_prefix = """
             echo 'No self-relatedness JSON files found.'
             mkdir -p self_relatedness_jsons
