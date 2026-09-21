@@ -99,8 +99,10 @@ def related_co_parents(tmp_path: Path, ped: str = TRIO_PED) -> dict[str, str]:
     )
 
 
-def co_parent_flags(inputs: dict[str, str], consanguineous: set[str] | None = None) -> list:
-    flags, _, _ = produce_flags(**inputs, consanguineous_sgs=consanguineous)
+def co_parent_flags(
+    inputs: dict[str, str], consanguineous: set[str] | None = None, contaminated: set[str] | None = None
+) -> list:
+    flags, _, _ = produce_flags(**inputs, consanguineous_sgs=consanguineous, contaminated_sgs=contaminated)
     return [
         flag
         for sg_flags in flags.values()

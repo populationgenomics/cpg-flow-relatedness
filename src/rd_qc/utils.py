@@ -24,6 +24,7 @@ SG_QUERY = gql("""
                 id
                 type
                 technology
+                meta
                 sample {
                     participant {
                         id
@@ -468,6 +469,29 @@ def consanguineous_sg_ids(sgs: list[dict]) -> set[str]:
 def get_project_consanguineous_sg_ids(project: str) -> set[str]:
     """SG IDs whose participant is recorded as the product of a consanguineous union."""
     return consanguineous_sg_ids(_query_project_sgs(project))
+
+
+CONTAMINATED_FLAG = 'FREEMIX'
+
+
+def contaminated_sg_ids(sgs: list[dict]) -> set[str]:
+    """
+    The SG IDs in an SG_QUERY response whose cram_qc_flags include an unresolved contamination flag.
+    """
+    cram_qc_flags_key = 'cram_qc_flags'
+    contaminated = set()
+    for sg in sgs:
+        if any(
+            flag['flag'] == CONTAMINATED_FLAG and flag['resolved'] is False
+            for flag in (sg.get('meta') or {}).get(cram_qc_flags_key, [])
+        ):
+            contaminated.add(sg['id'])
+    return contaminated
+
+
+def get_project_contaminated_sg_ids(project: str) -> set[str]:
+    """SG IDs whose participant is recorded as contaminated."""
+    return contaminated_sg_ids(_query_project_sgs(project))
 
 
 def find_sgids_without_somalier(index: SomalierIndex) -> set[str]:
