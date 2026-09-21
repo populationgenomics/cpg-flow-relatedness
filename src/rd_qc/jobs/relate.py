@@ -193,12 +193,23 @@ def record_somalier_flags_job(
         f.writelines([f'{p}\n' for p in somalier_self_relatedness_json_paths])
     somalier_self_relatedness_jsons = batch_instance.read_input(file_list_path)
 
+    # And handle the case where there are no self-relatedness JSON files for the SGs
+    if file_list_path.stat().st_size == 0:
+        cmd_prefix = """
+            echo 'No self-relatedness JSON files found.'
+            mkdir -p self_relatedness_jsons
+        """
+    else:
+        cmd_prefix = f"""\
+           mkdir -p self_relatedness_jsons
+           cat {somalier_self_relatedness_jsons} | gcloud storage cp -I self_relatedness_jsons/
+        """
+
     # Read in the full relatedness JSON file for the dataset
     somalier_relatedness_json = batch_instance.read_input(somalier_relatedness_json)
 
     cmd = f"""\
-    mkdir -p self_relatedness_jsons
-    cat {somalier_self_relatedness_jsons} | gcloud storage cp -I self_relatedness_jsons/
+    {cmd_prefix} \\
 
     python3 -m rd_qc.scripts.record_somalier_flags \\
     --dataset {dataset_name} \\

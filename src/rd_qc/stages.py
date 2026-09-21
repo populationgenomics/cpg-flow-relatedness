@@ -106,7 +106,15 @@ class SomalierSelfCheck(stage.DatasetStage):
         missing_participants = {
             peid
             for (pid, peid), sg_list in index.by_participant.items()
-            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK and not exists(outputs[f'{peid}_samples_tsv'])
+            if len(sg_list) >= _MIN_SGS_FOR_IDENTITY_CHECK
+            and not all(
+                [
+                    exists(outputs[f'{peid}_samples_tsv']),
+                    exists(outputs[f'{peid}_pairs_tsv']),
+                    exists(outputs[f'{peid}_json']),
+                    exists(outputs[f'{peid}_html']),
+                ]
+            )
         }
 
         if not missing_participants:
