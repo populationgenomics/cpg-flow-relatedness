@@ -476,11 +476,7 @@ CONTAMINATED_FLAG = 'FREEMIX'
 
 def contaminated_sg_ids(sgs: list[dict]) -> set[str]:
     """
-    The SG IDs in an SG_QUERY response whose participant is recorded as contaminated.
-
-    Only the literal 1 counts. An absent key, a '0', or any other value is treated as not
-    recorded, so an unknown contamination status keeps its flag instead of being quietly excused: a dataset that
-    has never supplied the field should lose no flags at all.
+    The SG IDs in an SG_QUERY response whose cram_qc_flags include an unresolved contamination flag.
     """
     cram_qc_flags_key = 'cram_qc_flags'
     contaminated = set()
