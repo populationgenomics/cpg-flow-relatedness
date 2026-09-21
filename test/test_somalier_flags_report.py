@@ -6,6 +6,8 @@ when a pedigree pair straddles two families, and how a family that has both acti
 flags gets split across the two sections. Everything here is a pure function, so no Metamist.
 """
 
+import re
+
 import pytest
 from fixtures.somalier_flags import (
     MOCK_ALL_CLEAR_SEQUENCING_GROUPS,
@@ -65,6 +67,26 @@ def run_pipeline(sequencing_groups=MOCK_SEQUENCING_GROUPS, infos=MOCK_SG_INFOS):
 
 def group_by_label(groups) -> dict:
     return {group.label: group for group in groups}
+
+
+def blurb_text(html: str, heading: str) -> str:
+    """
+    The plain text of the blurb paragraph under a section heading, with markup stripped.
+
+    Scoping to one blurb keeps a section's wording from being satisfied by prose elsewhere on the
+    page, and stripping tags keeps these assertions from breaking when a phrase gains or loses an
+    <em>. The wording itself is free to change; what these tests pin is that a corrected claim
+    does not quietly revert.
+
+    Bounded at the section's own table wrapper rather than running to the next blurb on the page,
+    so a section whose blurb was deleted reads as empty instead of silently borrowing the next
+    section's paragraph and passing for the wrong reason.
+    """
+    section = html.split(heading)[1].split('<div data-section=', maxsplit=1)[0]
+    if '<p class="blurb">' not in section:
+        return ''
+    paragraph = section.split('<p class="blurb">')[1].split('</p>')[0]
+    return ' '.join(re.sub(r'<[^>]+>', ' ', paragraph).split())
 
 
 # ---------------------------------------------------------------------------
@@ -404,9 +426,10 @@ def test_refinements_render_in_their_own_section_with_the_explanation():
 
     assert 'Pedigree refinements' in html
     assert 'Pedigree conflicts' in html
-    # The section explains the missing-parent cause, which is why these rows exist at all.
-    # Matched within one line, since the template's prose is hard-wrapped.
-    assert 'whenever a parent is missing' in html
+    # Deliberately not pinning the wording, which is free to change. A section of non-findings
+    # with no explanation at all leaves a reader guessing why the rows are there, so only the
+    # presence of one is pinned.
+    assert blurb_text(html, 'Pedigree refinements') != ''
 
 
 def test_a_dataset_of_only_refinements_still_shows_the_all_clear():
@@ -612,15 +635,13 @@ def test_the_raw_relationship_is_still_searchable():
     assert 'related at unknown level' in refinement_row().search_blob
 
 
-def test_the_refinements_blurb_describes_the_case_that_actually_occurs():
-    html = render_fixture_html()
+def test_the_refinements_blurb_does_not_claim_full_siblings_are_a_refinement():
+    # 'siblings' -> 'full siblings' is satisfied by EXPECTED_DEGREES, so that pair never reaches
+    # the refinements section and must never be described there as the case that occurs. Scoped
+    # to the blurb, because the bands legend names 'full siblings' legitimately.
+    blurb = blurb_text(render_fixture_html(), 'Pedigree refinements')
 
-    # 'siblings' -> 'full siblings' is satisfied by EXPECTED_DEGREES, so it never reaches the
-    # refinements section and must not be described there as the common case. Checked against the
-    # blurb alone, because the bands legend names 'full siblings' legitimately.
-    blurb = html.split('Pedigree refinements')[1].split('</p>')[0]
     assert 'full siblings' not in blurb
-    assert 'no relationship' in blurb.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -784,14 +805,16 @@ def test_the_bands_strip_names_the_first_degree_split():
     assert 'full siblings' in html
 
 
-def test_the_refinements_blurb_admits_some_cannot_be_closed():
+def test_the_refinements_blurb_does_not_promise_every_refinement_is_closable():
+    # Many refinements cannot be closed at all: a pedigree encodes relationships only through
+    # parent links, so a pair whose connecting individual is absent from the database cannot be
+    # stated at all. The blurb must stay hedged rather than promising a pedigree edit resolves
+    # them, which is what the original wording did.
     html = render_fixture_html()
+    blurb = blurb_text(html, 'Pedigree refinements')
 
-    # The old wording promised every refinement was a pedigree correction waiting to happen.
     assert 'the pedigree can be updated to say so' not in html
-    # Matched within one line, since the template's prose is hard-wrapped.
-    assert 'cannot be closed at all' in html
-    assert 'only through parent links' in html
+    assert 'may' in blurb.split()
 
 
 # ---------------------------------------------------------------------------
@@ -914,8 +937,10 @@ def test_the_same_individual_section_renders_with_its_explanation():
     html = render_fixture_html()
 
     assert 'Same individual' in html
-    # Explains why the pedigree models one person's two SGs as siblings.
-    assert 'two pedigree rows' in html
+    # The cross-reference is the actionable part and the one claim worth pinning: it tells an
+    # analyst that a genuine mismatch between two SGs of one person surfaces above as a
+    # self-relatedness flag, not in this section of non-findings.
+    assert 'Self-relatedness' in blurb_text(html, 'Same individual')
 
 
 def test_the_same_individual_pair_is_absent_from_the_conflicts_section():
