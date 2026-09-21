@@ -30,6 +30,7 @@ from rd_qc.utils import (
     SomalierSexInferenceFlag,
     expected_relationship_label,
     get_project_consanguineous_sg_ids,
+    get_project_contaminated_sg_ids,
     infer_degree,
     refine_expected_relationship,
     relatedness_verdict,
@@ -211,6 +212,7 @@ def _check_relatedness(
     expected_ped: Ped,
     bad_ids: list,
     consanguineous_sgs: set[str] | None = None,
+    contaminated_sgs: set[str] | None = None,
 ) -> dict[str, list[SomalierRelatednessFlag]]:
     """
     Compare what the pedigree expects against what somalier measured, pair by pair.
@@ -219,7 +221,8 @@ def _check_relatedness(
     comes from the kinship coefficient and ibs0 via `infer_degree`.
 
     `consanguineous_sgs` lets a co-parent pair be excused when the pedigree already records their
-    union. Empty or omitted means nothing is excused.
+    union. `contaminated_sgs` lets an SG be excused if it is known to be contaminated.
+    Empty or omitted means nothing is excused.
     """
     info('*Relatedness:*')
     expected_ped_sample_by_id: dict[str, Sample] = {s.sample_id: s for s in expected_ped.samples()}
@@ -231,6 +234,9 @@ def _check_relatedness(
         s1 = row['#sample_a']
         s2 = row['sample_b']
         if s1 in bad_ids or s2 in bad_ids:
+            continue
+        if contaminated_sgs and (s1 in contaminated_sgs or s2 in contaminated_sgs):
+            logger.info(f'{s1} - {s2}: one or both SGs are contaminated. Not flagged for relatedness mismatch.')
             continue
 
         expected_ped_s1 = expected_ped_sample_by_id.get(s1, {})
@@ -298,6 +304,7 @@ def produce_flags(
     somalier_pairs: str,
     expected_ped_path: str,
     consanguineous_sgs: set[str] | None = None,
+    contaminated_sgs: set[str] | None = None,
 ) -> tuple[dict[str, list[SomalierFlag]], pd.DataFrame, pd.DataFrame]:
     """
     Read the somalier relate outputs and produce every flag they imply, keyed by SG id.
@@ -328,6 +335,7 @@ def produce_flags(
         expected_ped,
         bad_ids,
         consanguineous_sgs,
+        contaminated_sgs,
     )
 
     all_flags_by_sg_id: dict[str, list[SomalierFlag]] = {}
@@ -362,6 +370,7 @@ def run(
         somalier_pairs=somalier_pairs,
         expected_ped_path=expected_ped,
         consanguineous_sgs=get_project_consanguineous_sg_ids(dataset),
+        contaminated_sgs=get_project_contaminated_sg_ids(dataset),
     )
 
     print_contents(
