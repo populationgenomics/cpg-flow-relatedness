@@ -65,6 +65,7 @@ SOMALIER_RELATE_ANALYSES_QUERY = gql("""
     query SgSomalierRelateAnalyses($project: String!) {
         project(name: $project) {
             analyses(type: {in_: ["somalier_relate"]}) {
+                id
                 outputs
                 type
                 meta
