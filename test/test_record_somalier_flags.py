@@ -36,6 +36,24 @@ def sex_flag(**overrides: object) -> dict:
     } | overrides
 
 
+def self_relatedness_flag(**overrides: object) -> dict:
+    """A self_relatedness_mismatch flag as stored in / written to SG meta."""
+    return {
+        'category': 'self_relatedness_mismatch',
+        'date': FIRST_SEEN,
+        'ar_guid': 'guid-old',
+        'resolved': False,
+        'resolution_date': None,
+        'sg_id_1': 'CPG1',
+        'sg_id_2': 'CPG1B',
+        'participant_external_id': 'PART1',
+        'threshold': 0.4,
+        'relatedness': 0.9,
+        'ibs0': 5,
+        'ibs2': 950,
+    } | overrides
+
+
 def relatedness_flag(**overrides: object) -> dict:
     """A relatedness_mismatch flag as stored in / written to SG meta."""
     return {
@@ -188,7 +206,7 @@ def test_a_flag_stored_before_the_manual_fields_existed_still_deserialises():
     assert flag.manual_resolution_by is None
 
 
-def manually_resolved(flag: dict, **overrides: object) -> dict:
+def curator_resolved(flag: dict, **overrides: object) -> dict:
     """`flag` as the resolve CLI leaves it: resolved, with the reviewer's reason attached."""
     return (
         flag
@@ -210,7 +228,7 @@ def test_manually_resolved_flag_stays_resolved_when_the_finding_recurs(written_m
     Without the manual branch this flag falls through compare_* into the overwrite branch, which
     sets resolved=False and leaves the manual fields on an active flag.
     """
-    held = manually_resolved(relatedness_flag())
+    held = curator_resolved(relatedness_flag())
     recurrence = relatedness_flag(date=TODAY, relatedness=0.05, ibs0=850, ibs2=120)
 
     reconcile(current_flags=[held], new_flags=[recurrence])
@@ -232,7 +250,7 @@ def test_a_changed_finding_is_not_suppressed_by_a_manual_resolution(written_meta
     This is the safety property. A pair accepted as parent-child must not stay quiet when the
     genotypes start saying unrelated.
     """
-    held = manually_resolved(relatedness_flag())
+    held = curator_resolved(relatedness_flag())
     reinferred = relatedness_flag(inferred_relationship='parent-child')
 
     reconcile(current_flags=[held], new_flags=[reinferred])
@@ -248,7 +266,7 @@ def test_a_changed_finding_is_not_suppressed_by_a_manual_resolution(written_meta
 
 def test_a_manually_resolved_flag_stays_held_when_the_finding_disappears(written_meta):
     """An accepted finding that later goes away keeps its marker and stays out of the report."""
-    held = manually_resolved(relatedness_flag())
+    held = curator_resolved(relatedness_flag())
 
     reconcile(current_flags=[held], new_flags=[sex_flag()])
 
@@ -257,13 +275,29 @@ def test_a_manually_resolved_flag_stays_held_when_the_finding_disappears(written
     assert written['resolution_date'] == RESOLVED_EARLIER, 'the resolution date is not re-stamped'
 
 
-def test_manual_resolution_is_held_for_every_category(written_meta):
-    """The branch is duplicated across three reconcilers, so all three get pinned."""
-    held_sex = manually_resolved(sex_flag())
+@pytest.mark.parametrize(
+    ('category', 'flag_factory', 'recurrence_overrides', 'measured_field', 'refreshed_value'),
+    [
+        ('sex_inference_mismatch', sex_flag, {'mean_depth': 29.0}, 'mean_depth', 29.0),
+        ('self_relatedness_mismatch', self_relatedness_flag, {'relatedness': 0.5}, 'relatedness', 0.5),
+        ('relatedness_mismatch', relatedness_flag, {'relatedness': 0.05}, 'relatedness', 0.05),
+    ],
+)
+def test_manual_resolution_is_held_for_every_category(
+    written_meta, category, flag_factory, recurrence_overrides, measured_field, refreshed_value
+):
+    """
+    The branch is duplicated across three reconcilers, so all three need their own coverage.
 
-    reconcile(current_flags=[held_sex], new_flags=[sex_flag(mean_depth=29.0)])
+    Each case recurs the SAME identity with only a measured field changed, so this exercises the
+    held branch specifically rather than the added-new-flag path (which a changed identity would
+    trigger instead, passing for the wrong reason).
+    """
+    held = curator_resolved(flag_factory())
 
-    written = flags_by_category(written_meta)['sex_inference_mismatch']
+    reconcile(current_flags=[held], new_flags=[flag_factory(**recurrence_overrides)])
+
+    written = flags_by_category(written_meta)[category]
     assert written['resolved'] is True
     assert written['manually_resolved'] is True
-    assert written['mean_depth'] == 29.0, 'measured values still refresh while held'
+    assert written[measured_field] == refreshed_value, 'measured values still refresh while held'
