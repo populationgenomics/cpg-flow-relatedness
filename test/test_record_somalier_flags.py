@@ -301,3 +301,28 @@ def test_manual_resolution_is_held_for_every_category(
     assert written['resolved'] is True
     assert written['manually_resolved'] is True
     assert written[measured_field] == refreshed_value, 'measured values still refresh while held'
+
+
+@pytest.mark.parametrize(
+    ('category', 'factory', 'refreshed', 'field', 'expected'),
+    [
+        ('sex_inference_mismatch', sex_flag, {'mean_depth': 29.0}, 'mean_depth', 29.0),
+        ('self_relatedness_mismatch', self_relatedness_flag, {'relatedness': 0.5}, 'relatedness', 0.5),
+        ('relatedness_mismatch', relatedness_flag, {'relatedness': 0.05}, 'relatedness', 0.05),
+    ],
+)
+def test_a_recurring_flag_is_retained_for_every_category(written_meta, category, factory, refreshed, field, expected):
+    """
+    The retained branch, pinned per category.
+
+    All three reconcilers route this branch through one `refresh_measured_values` call with their
+    own field tuple, so passing the wrong tuple would silently stop refreshing measurements. Only
+    the relatedness category covered this before, which is how a wrong tuple could have shipped.
+    """
+    reconcile(current_flags=[factory()], new_flags=[factory(date=TODAY, **refreshed)])
+
+    written = flags_by_category(written_meta)[category]
+    assert written['resolved'] is False
+    assert written['resolution_date'] is None
+    assert written['date'] == FIRST_SEEN, 'a recurring issue keeps its first-detected date'
+    assert written[field] == expected, "this run's measurement is taken"
