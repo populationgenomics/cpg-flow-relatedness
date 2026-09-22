@@ -3,7 +3,7 @@ Reading and writing the `somalier_flags` list on a sequencing group's meta in Me
 
 Both the pipeline's reconciler and the resolve CLI write this list, and the mutation replaces it
 wholesale rather than patching entries, so a second independently-written copy of it is a second
-chance to drop every flag on an SG. It lives here once.
+chance to drop every flag on an SG.
 """
 
 from rd_qc.utils import sg_ids_tag

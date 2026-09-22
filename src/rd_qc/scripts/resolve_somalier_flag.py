@@ -29,12 +29,10 @@ EXIT_REFUSED = 1
 # Deliberately matches argparse's own exit code for a bad invocation: both mean the same thing to a caller.
 EXIT_BAD_ARGS = 2
 
-# The argument that reopens a flag, spelled once so the parser Task 6 adds cannot drift from the
-# refusal message below that tells a curator to use it.
+# Named once so the parser and the refusal message that points a curator at it cannot drift apart.
 UNRESOLVE_ARG = '--unresolve'
 
-# Fields that distinguish flags of one category, for `describe`. Keyed the same way FLAG_CLASSES
-# is in somalier_flags_report.py, but this module only needs field names, not the dataclasses.
+# The fields that tell two flags of the same category apart, for `describe`.
 CATEGORY_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
     'sex_inference_mismatch': ('provided', 'inferred'),
     'self_relatedness_mismatch': ('participant_external_id', 'threshold'),
@@ -74,10 +72,10 @@ def describe(flags: list[dict], sg_key: str) -> str:
     """
     One summary line per flag: category, sequencing group key, identity fields, and state.
 
-    A full flag dict is a several-hundred-character JSON blob dominated by `ar_guid`, `date` and
-    null manual-resolution fields that never distinguish two candidates; a curator picking between
-    them needs only what does. An unrecognised category prints with no identity fields rather than
-    raising, since this exists to help diagnose a mismatch, not to be another way to crash on one.
+    A curator choosing between two candidates needs the fields that differ between them, not the
+    whole record: `ar_guid`, `date` and the null manual-resolution fields never distinguish one
+    from another. An unrecognised category prints with no identity fields rather than raising,
+    since this exists to help diagnose a mismatch rather than be another way to crash on one.
     """
     lines = []
     for flag in flags:

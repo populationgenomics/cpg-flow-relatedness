@@ -223,9 +223,9 @@ def curator_resolved(flag: dict, **overrides: object) -> dict:
 
 def test_manually_resolved_flag_stays_resolved_when_the_finding_recurs(written_meta):
     """
-    The whole point of the feature: a run that measures the same thing again must not reopen it.
+    A run that measures the same finding again must not reopen it.
 
-    Without the manual branch this flag falls through compare_* into the overwrite branch, which
+    Without the manual branch the flag falls through compare_* into the overwrite branch, which
     sets resolved=False and leaves the manual fields on an active flag.
     """
     held = curator_resolved(relatedness_flag())
@@ -316,8 +316,7 @@ def test_a_recurring_flag_is_retained_for_every_category(written_meta, category,
     The retained branch, pinned per category.
 
     All three reconcilers route this branch through one `refresh_measured_values` call with their
-    own field tuple, so passing the wrong tuple would silently stop refreshing measurements. Only
-    the relatedness category covered this before, which is how a wrong tuple could have shipped.
+    own field tuple, so passing the wrong tuple would silently stop refreshing measurements.
     """
     reconcile(current_flags=[factory()], new_flags=[factory(date=TODAY, **refreshed)])
 

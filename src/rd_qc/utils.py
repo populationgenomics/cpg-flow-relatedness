@@ -144,10 +144,10 @@ class SomalierFlag:
     ar_guid: str = field(default_factory=try_get_ar_guid)
     resolved: bool = False
     resolution_date: str | None = None
-    # A resolution a curator recorded by hand with resolve_somalier_flag, rather than one
-    # reconciliation inferred from the finding going away. Held across runs even while the finding
-    # recurs, and skipped by the report. `resolved` and `resolution_date` are set alongside these,
-    # so a reader that only knows about automatic resolution still sees a resolved flag.
+    # A resolution recorded by hand, rather than one inferred from the finding going away. Held
+    # across runs while the finding recurs, and skipped by the report. `resolved` and
+    # `resolution_date` are set alongside these, so a reader that knows nothing about manual
+    # resolution still sees a resolved flag.
     manually_resolved: bool = False
     manual_resolution_reason: str | None = None
     manual_resolution_by: str | None = None

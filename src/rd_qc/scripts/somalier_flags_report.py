@@ -448,9 +448,9 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
         for entry in meta.get('somalier_flags') or []:
             raw = entry or {}
             if raw.get('manually_resolved'):
-                # Reviewed and accepted by a curator, so it is not a finding this report is for.
-                # Dropped here rather than downstream because this is the only way flags enter the
-                # report: skipping here keeps it out of all four sections and every summary count.
+                # Reviewed and accepted by a curator, so not a finding this report is for. This
+                # is the only way flags enter the report, so one skip covers every section and
+                # every summary count.
                 logger.info(f'{sg["id"]} :: skipping manually resolved Somalier flag')
                 held_count += 1
                 continue
@@ -465,8 +465,8 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
                 logger.warning(f'{sg["id"]} :: skipping malformed {category} flag: {exc}')
         collected.append(SgFlags(sg_id=sg['id'], flags=tuple(flags)))
     if held_count:
-        # The report shows held flags nowhere, so this line is the only place an operator can see
-        # that findings were suppressed without querying Metamist.
+        # Held flags appear nowhere else in the report, so this is an operator's only sign that
+        # findings were suppressed, short of querying Metamist.
         logger.info(f'Left {held_count} manually resolved Somalier flag(s) out of the report.')
     return collected
 

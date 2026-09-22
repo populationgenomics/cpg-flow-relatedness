@@ -146,9 +146,9 @@ def test_holding_one_flag_takes_nothing_else_with_it():
     """
     A held flag removes itself from the report and no more than itself.
 
-    The hold-everything test below cannot see this: a skip that also swallowed a sibling produces
-    the same empty report as a correct one. CPG004 carries three flags, so holding one of them
-    pins that its two siblings survive.
+    A skip that also swallowed a sibling would empty the report just as a correct one does, so
+    that is invisible to a test that holds everything. CPG004 carries three flags, so holding one
+    of them pins that its two siblings survive.
     """
     target_sg_id = 'CPG004'
     stored = next(sg['meta']['somalier_flags'] for sg in MOCK_SEQUENCING_GROUPS if sg['id'] == target_sg_id)

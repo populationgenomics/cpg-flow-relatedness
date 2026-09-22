@@ -110,10 +110,9 @@ def reconcile_sg_somalier_sex_inference_flags(
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' remains resolved.")
         elif flag.get('manually_resolved'):
-            # Reviewed and accepted by a curator. The finding is still here, so take this run's
-            # measurements but leave the resolution alone. Without this branch the flag falls
-            # through compare_* (which requires an unresolved flag) into the overwrite below,
-            # which would reopen it every run.
+            # Reviewed and accepted by a curator: the finding is still here, so take this run's
+            # measurements but leave the resolution alone. compare_* requires an unresolved flag,
+            # so without this branch the overwrite below would reopen it on every run.
             refresh_measured_values(flag, new_somalier_sex_inference_flags_by_key[flag_key], SEX_MEASURED_FIELDS)
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' "
@@ -181,7 +180,7 @@ def reconcile_sg_somalier_self_relatedness_flags(
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' remains resolved.")
         elif flag.get('manually_resolved'):
-            # See reconcile_sg_somalier_sex_inference_flags above: held across runs, measurements still refreshed.
+            # Reviewed and accepted by a curator: refresh the measurements, keep the resolution.
             refresh_measured_values(
                 flag,
                 new_somalier_self_relatedness_flags_by_key[flag_key],
@@ -255,7 +254,7 @@ def reconcile_sg_somalier_relatedness_flags(
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['category']}' remains resolved.")
         elif flag.get('manually_resolved'):
-            # See reconcile_sg_somalier_sex_inference_flags above: held across runs, measurements still refreshed.
+            # Reviewed and accepted by a curator: refresh the measurements, keep the resolution.
             refresh_measured_values(flag, new_somalier_relatedness_flags_by_key[flag_key], RELATEDNESS_MEASURED_FIELDS)
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['category']}' "
