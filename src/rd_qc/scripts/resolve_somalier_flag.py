@@ -81,7 +81,7 @@ def describe(flags: list[dict], sg_key: str) -> str:
     """
     lines = []
     for flag in flags:
-        category = flag.get('category')
+        category = flag.get('category', '')
         fields = CATEGORY_IDENTITY_FIELDS.get(category, ())
         identity = ' '.join(f'{field}={flag.get(field)}' for field in fields)
         parts = [part for part in (category, sg_key, identity, flag_state(flag)) if part]

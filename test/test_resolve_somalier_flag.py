@@ -260,18 +260,35 @@ def metamist(monkeypatch):
     return state
 
 
-def run(_metamist_state: dict, **overrides: object) -> int:
-    """Invoke main with the usual arguments, overriding as needed."""
-    kwargs = {
-        'dataset': 'my-dataset',
-        'sg_ids': ['CPG2', 'CPG1'],
-        'category': 'relatedness_mismatch',
-        'reason': REASON,
-        'reviewer': REVIEWER,
-        'unresolve': False,
-        'assume_yes': False,
-    } | overrides
-    return cli.main(**kwargs)
+def run(
+    _metamist_state: dict,
+    *,
+    dataset: str = 'my-dataset',
+    sg_ids: list[str] | None = None,
+    category: str = 'relatedness_mismatch',
+    reason: str = REASON,
+    reviewer: str = REVIEWER,
+    unresolve: bool = False,
+    assume_yes: bool = False,
+) -> int:
+    """
+    Invoke main with the usual arguments, overriding as needed.
+
+    Spelled out rather than collected into a `**overrides` dict so the types survive: a dict of
+    mixed values is `dict[str, object]`, which mypy cannot match against main's signature.
+
+    `sg_ids` defaults via None because the pair is deliberately unsorted, so that every test
+    exercises the sorting rather than the owning SG happening to come first.
+    """
+    return cli.main(
+        dataset=dataset,
+        sg_ids=['CPG2', 'CPG1'] if sg_ids is None else sg_ids,
+        category=category,
+        reason=reason,
+        reviewer=reviewer,
+        unresolve=unresolve,
+        assume_yes=assume_yes,
+    )
 
 
 def test_resolving_writes_the_marked_flag_against_the_owning_sg(metamist):
