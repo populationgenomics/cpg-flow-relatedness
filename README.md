@@ -36,7 +36,7 @@ resolve_somalier_flag --dataset my-dataset --sg-ids CPG001 CPG002 \
     --category relatedness_mismatch --reason "pedigree known wrong" --reviewer ef
 ```
 
-Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report, and the Slack summary counts, entirely rather than shown as resolved history. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. `--unresolve` reverses it.
+Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report and the Slack summary counts entirely, rather than shown as resolved history. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. Run it locally, against your own Metamist credentials. If more than one flag matches the category and sequencing group IDs it refuses to guess, listing the candidates instead. `--unresolve` reverses a resolution.
 
 ## Relatedness inferences
 
@@ -88,7 +88,7 @@ src
 
 `utils.py` contains the flag dataclasses, the relatedness inference and verdict logic, and utility functions for querying Metamist and building PED files.
 
-`flag_store.py` is the only module that reads or writes the `somalier_flags` list on a sequencing group's meta. The mutation replaces the whole list, so both the pipeline's reconciler and `resolve_somalier_flag` go through it.
+`flag_store.py` is the only module that writes the `somalier_flags` list on a sequencing group's meta. The mutation replaces the whole list rather than patching entries, so a second copy of that write is a second chance to drop every flag on a sequencing group, and both the pipeline's reconciler and `resolve_somalier_flag` go through this one. Reading is less dangerous, and the reconciler and the report still read the meta key directly.
 
 `jobs/` contains the Hail Batch job builders. `scripts/` contains the post-processing scripts those jobs run.
 

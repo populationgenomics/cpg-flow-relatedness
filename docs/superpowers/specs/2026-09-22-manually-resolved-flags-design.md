@@ -59,7 +59,7 @@ It exits non-zero without writing when no unresolved flag matches, when more tha
 
 ## Shared access to the meta key
 
-`DATASET_SG_META_QUERY` and `SG_META_MUTATION` live in `record_somalier_flags.py:13-40` today. Both move to a new `src/rd_qc/flag_store.py`, which exposes a read and a write over `meta['somalier_flags']` for the reconciler and the CLI to share.
+`DATASET_SG_META_QUERY` and `SG_META_MUTATION` live in `record_somalier_flags.py:13-40` today. Both move to a new `src/rd_qc/flag_store.py`, which exposes a read and a write over `meta['somalier_flags']` for the reconciler and the CLI to share. It is the only writer, which is the property that matters; the reconciler and the report still read the meta key directly, and reading cannot drop a flag.
 
 `sequencing_group_key` (`record_somalier_flags.py:43-55`) moves there with them. The CLI needs the same fallback for flags recorded before the field existed, and importing it from the reconciler script would point the dependency the wrong way, so all three pieces of flag-record plumbing end up in one module.
 
