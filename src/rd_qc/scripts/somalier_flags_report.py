@@ -445,6 +445,12 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
         meta = sg.get('meta') or {}
         flags: list[SomalierFlag] = []
         for raw in meta.get('somalier_flags') or []:
+            if (raw or {}).get('manually_resolved'):
+                # Reviewed and accepted by a curator, so it is not a finding this report is for.
+                # Dropped here rather than downstream because this is the only way flags enter the
+                # report: skipping here keeps it out of all four sections and every summary count.
+                logger.debug(f'{sg["id"]} :: skipping manually resolved Somalier flag')
+                continue
             category = (raw or {}).get('category') or ''
             flag_class = FLAG_CLASSES.get(category)
             if flag_class is None:

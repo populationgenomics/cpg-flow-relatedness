@@ -13,6 +13,7 @@ from fixtures.somalier_flags import (
     MOCK_ALL_CLEAR_SEQUENCING_GROUPS,
     MOCK_SEQUENCING_GROUPS,
     MOCK_SG_INFOS,
+    RESOLVED_ON,
     pedigree_flag,
     sex_flag,
 )
@@ -121,6 +122,52 @@ def test_collect_handles_sg_with_no_meta_at_all():
     collected = collect_somalier_flags([{'id': 'CPG001', 'meta': None}])
 
     assert collected == [SgFlags(sg_id='CPG001', flags=())]
+
+
+# A manual resolution as the resolve CLI writes it, for spreading over a fixture flag.
+HELD = {
+    'resolved': True,
+    'resolution_date': RESOLVED_ON,
+    'manually_resolved': True,
+    'manual_resolution_reason': 'pedigree known wrong',
+    'manual_resolution_by': 'ef',
+}
+
+
+def test_collect_skips_a_manually_resolved_flag():
+    groups = [{'id': 'CPG001', 'meta': {'somalier_flags': [sex_flag('CPG001', 'M', 'F') | HELD]}}]
+
+    collected = collect_somalier_flags(groups)
+
+    assert collected[0].flags == ()
+
+
+def test_manually_resolved_flags_reach_no_section_and_no_count():
+    """
+    Held flags are invisible, not merely de-emphasised.
+
+    Not a conflict, not a refinement, not resolved history, and not in any summary number, so a
+    reader cannot mistake an accepted finding for a fixed one.
+    """
+    _, _, _, baseline = run_pipeline()
+    assert baseline['active_flags'] > 0, 'the baseline fixture must have something to hide'
+
+    held_groups = [
+        {
+            'id': sg['id'],
+            'meta': {'somalier_flags': [flag | HELD for flag in (sg['meta'] or {}).get('somalier_flags', [])]},
+        }
+        for sg in MOCK_SEQUENCING_GROUPS
+    ]
+
+    flagged, active, resolved, summary = run_pipeline(held_groups)
+
+    assert flagged == []
+    assert (active, resolved) == ([], [])
+    assert summary['active_flags'] == 0
+    assert summary['active_conflicts'] == 0
+    assert summary['active_refinements'] == 0
+    assert summary['resolved_flags'] == 0
 
 
 # ---------------------------------------------------------------------------
