@@ -186,3 +186,91 @@ def replace_flag(flags: list[dict], target: dict, replacement: dict) -> list[dic
     Two history records for one pair can be equal dicts, and only the selected one may be rewritten.
     """
     return [replacement if flag is target else flag for flag in flags]
+
+
+def confirmed() -> bool:
+    """Ask before writing. Anything other than an explicit 'y' is a no."""
+    return input('Write this change? [y/N] ').strip().lower() == 'y'
+
+
+def main(
+    dataset: str,
+    sg_ids: list[str],
+    category: str,
+    reason: str,
+    reviewer: str,
+    *,
+    unresolve: bool = False,
+    assume_yes: bool = False,
+) -> int:
+    """
+    Resolve or reopen one flag. Returns the process exit code and writes at most once.
+
+    Nothing is written unless exactly one flag matched and the change was confirmed.
+    """
+    if not reason.strip() or not reviewer.strip():
+        logger.error('--reason and --reviewer must both be non-empty.')
+        return EXIT_BAD_ARGS
+
+    sg_key = flag_key_of(sg_ids)
+    owner = owning_sg_id(sg_ids)
+
+    flags = read_sg_flags(dataset, owner)
+    if flags is None:
+        logger.error(f'{owner} is not a sequencing group in {dataset}.')
+        return EXIT_REFUSED
+
+    target, problem = select_target(flags, sg_key, category, owner, unresolve=unresolve)
+    if target is None:
+        logger.error(problem)
+        return EXIT_REFUSED
+
+    action = 'Reopening' if unresolve else 'Manually resolving'
+    logger.info(f'{action} this flag on {owner} in {dataset}:\n{describe([target], sg_key)}')
+    if not assume_yes and not confirmed():
+        logger.info('Aborted, nothing written.')
+        return EXIT_REFUSED
+
+    now = datetime.now(tz=UTC).isoformat(timespec='seconds')
+    replacement = (
+        without_manual_resolution(target)
+        if unresolve
+        else with_manual_resolution(target, reason.strip(), reviewer.strip(), now)
+    )
+    write_sg_flags(dataset, owner, replace_flag(flags, target, replacement))
+    logger.info(f'Wrote {len(flags)} flags back to {owner} in {dataset}.')
+    return EXIT_OK
+
+
+def cli_main() -> int:
+    parser = ArgumentParser(description='Record or clear a manual resolution on one Somalier flag.')
+    parser.add_argument('--dataset', required=True, help='Dataset name')
+    parser.add_argument(
+        '--sg-ids',
+        nargs='+',
+        required=True,
+        help='The SG IDs the flag involves, in either order: one for a sex flag, two for a pair',
+    )
+    parser.add_argument('--category', required=True, choices=CATEGORIES, help='Flag category')
+    parser.add_argument('--reason', required=True, help='Why this finding is accepted as-is')
+    parser.add_argument('--reviewer', required=True, help='Who decided')
+    parser.add_argument(
+        UNRESOLVE_ARG,
+        action='store_true',
+        help='Reopen a manually resolved flag instead, so it returns to the report',
+    )
+    parser.add_argument('--yes', dest='assume_yes', action='store_true', help='Skip the confirmation prompt')
+    args = parser.parse_args()
+    return main(
+        dataset=args.dataset,
+        sg_ids=args.sg_ids,
+        category=args.category,
+        reason=args.reason,
+        reviewer=args.reviewer,
+        unresolve=args.unresolve,
+        assume_yes=args.assume_yes,
+    )
+
+
+if __name__ == '__main__':
+    raise SystemExit(cli_main())

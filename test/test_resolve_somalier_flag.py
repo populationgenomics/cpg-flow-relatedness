@@ -6,6 +6,8 @@ several stored flags, so the CLI has to pick the single unresolved one or refuse
 guess. Metamist and the terminal are patched out.
 """
 
+import pytest
+
 from rd_qc.scripts import resolve_somalier_flag as cli
 
 FIRST_SEEN = '2026-01-01T00:00:00+00:00'
@@ -234,3 +236,126 @@ def test_replace_flag_matches_on_identity_not_equality():
 
     assert written[0] is twin
     assert written[1] is replacement
+
+
+@pytest.fixture
+def metamist(monkeypatch):
+    """
+    Patch the flag store, confirm the prompt, and expose what would have been written.
+
+    `written` stays empty when nothing was written, which is what every refusal must produce.
+    """
+    state: dict = {'stored': [], 'written': {}}
+
+    def fake_read(_dataset: str, _sg_id: str) -> list[dict]:
+        return state['stored']
+
+    def fake_write(dataset: str, sg_id: str, flags: list[dict]) -> None:
+        state['written'] = {'dataset': dataset, 'sg_id': sg_id, 'flags': flags}
+
+    monkeypatch.setattr(cli, 'read_sg_flags', fake_read)
+    monkeypatch.setattr(cli, 'write_sg_flags', fake_write)
+    monkeypatch.setattr(cli, 'confirmed', lambda: True)
+    return state
+
+
+def run(_metamist_state: dict, **overrides: object) -> int:
+    """Invoke main with the usual arguments, overriding as needed."""
+    kwargs = {
+        'dataset': 'my-dataset',
+        'sg_ids': ['CPG2', 'CPG1'],
+        'category': 'relatedness_mismatch',
+        'reason': REASON,
+        'reviewer': REVIEWER,
+        'unresolve': False,
+        'assume_yes': False,
+    } | overrides
+    return cli.main(**kwargs)
+
+
+def test_resolving_writes_the_marked_flag_against_the_owning_sg(metamist):
+    metamist['stored'] = [relatedness_flag()]
+
+    assert run(metamist) == 0
+
+    written = metamist['written']
+    assert written['dataset'] == 'my-dataset'
+    assert written['sg_id'] == 'CPG1', 'pairwise flags live on the sorted-first SG'
+    assert len(written['flags']) == 1
+    assert written['flags'][0]['manually_resolved'] is True
+    assert written['flags'][0]['manual_resolution_by'] == REVIEWER
+    assert written['flags'][0]['manual_resolution_reason'] == REASON
+    assert written['flags'][0]['resolution_date'], 'a resolution date is stamped'
+
+
+def test_the_rest_of_the_list_is_written_back_untouched(metamist):
+    """The mutation replaces the whole list, so anything dropped here is lost from Metamist."""
+    history = relatedness_flag(inferred_relationship='parent-child', resolved=True)
+    metamist['stored'] = [history, relatedness_flag()]
+
+    assert run(metamist) == 0
+
+    assert metamist['written']['flags'][0] == history
+
+
+def test_unresolving_clears_the_marker(metamist):
+    metamist['stored'] = [held()]
+
+    assert run(metamist, unresolve=True) == 0
+
+    written = metamist['written']['flags'][0]
+    assert written['manually_resolved'] is False
+    assert written['resolved'] is False
+
+
+def test_a_refused_selection_writes_nothing(metamist):
+    metamist['stored'] = [held()]
+
+    assert run(metamist) == 1
+    assert metamist['written'] == {}
+
+
+def test_an_sg_missing_from_the_dataset_writes_nothing(metamist, monkeypatch):
+    monkeypatch.setattr(cli, 'read_sg_flags', lambda *_: None)
+
+    assert run(metamist) == 1
+    assert metamist['written'] == {}
+
+
+def test_declining_the_prompt_writes_nothing(metamist, monkeypatch):
+    metamist['stored'] = [relatedness_flag()]
+    monkeypatch.setattr(cli, 'confirmed', lambda: False)
+
+    assert run(metamist) == 1
+    assert metamist['written'] == {}
+
+
+def test_assume_yes_skips_the_prompt(metamist, monkeypatch):
+    metamist['stored'] = [relatedness_flag()]
+
+    def refuse() -> bool:
+        raise AssertionError('the prompt must not be reached with --yes')
+
+    monkeypatch.setattr(cli, 'confirmed', refuse)
+
+    assert run(metamist, assume_yes=True) == 0
+
+
+@pytest.mark.parametrize('blank', ['', '   '])
+def test_an_empty_reason_or_reviewer_is_rejected_before_anything_is_read(metamist, blank):
+    """An unexplained suppression is worse than none, so this fails at the door."""
+    metamist['stored'] = [relatedness_flag()]
+
+    assert run(metamist, reason=blank) == 2
+    assert run(metamist, reviewer=blank) == 2
+    assert metamist['written'] == {}
+
+
+def test_the_reason_and_reviewer_are_stored_stripped(metamist):
+    metamist['stored'] = [relatedness_flag()]
+
+    run(metamist, reason=f'  {REASON}  ', reviewer='  ef  ')
+
+    written = metamist['written']['flags'][0]
+    assert written['manual_resolution_reason'] == REASON
+    assert written['manual_resolution_by'] == 'ef'
