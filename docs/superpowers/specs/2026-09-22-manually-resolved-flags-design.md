@@ -65,6 +65,8 @@ It exits non-zero without writing when no unresolved flag matches, when more tha
 
 The mutation overwrites the whole list, so a second copy written independently is a second chance to drop every flag on an SG. Worth keeping in one place, and `flag_store.py` also gives the CLI's tests one thing to patch.
 
+Two writers also means a race the pipeline did not have when it was the only one. The CLI reads, prompts, then overwrites that SG's whole list, so a `record_somalier_flags` job that writes the same SG in between loses one set of changes silently. `updateSequencingGroup` offers no compare-and-swap to build on, so this is a caution to hand to curators (do not resolve flags while a relate run is in flight for that dataset) rather than something the code can close.
+
 ## Reconciliation
 
 The behaviour change is one branch in each of the three reconcile loops (`record_somalier_flags.py:122`, `:188`, `:249`), ahead of the `compare_*` call:
@@ -90,7 +92,9 @@ The alternative considered was clearing the marker at that point, so the flag wo
 
 ## Report
 
-One skip at the top of the loop in `collect_somalier_flags` (`somalier_flags_report.py:447`), logged at debug level.
+One skip at the top of the loop in `collect_somalier_flags` (`somalier_flags_report.py:447`), logged at info level, with a count of what was suppressed once the loop finishes.
+
+Info rather than debug because the report shows held flags nowhere else: that line is the only way an operator reading the job log can see that findings were suppressed, without going to Metamist.
 
 That function is the only place flags enter the report, so a flag dropped there is absent from all four sections, from every count in the summary cards, and from the Slack post, with no other file touched. Manually resolved flags are invisible in the report, not shown as a count.
 
