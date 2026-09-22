@@ -9,6 +9,7 @@ rather than silently dropped.
 import pytest
 
 from rd_qc.scripts import record_somalier_flags
+from rd_qc.utils import SomalierRelatednessFlag
 
 FIRST_SEEN = '2026-01-01T00:00:00+00:00'
 RESOLVED_EARLIER = '2026-02-02T00:00:00+00:00'
@@ -156,3 +157,29 @@ def test_no_stored_or_new_flags_writes_nothing(written_meta):
     reconcile(current_flags=[], new_flags=[])
 
     assert written_meta == {}
+
+
+def test_manual_resolution_fields_default_to_absent():
+    """A flag nobody has reviewed carries the fields, unset, so every record has the same shape."""
+    flag = SomalierRelatednessFlag(
+        category='relatedness_mismatch',
+        sg_id_1='CPG1',
+        sg_id_2='CPG2',
+        family_external_id='FAM1',
+        expected_relationship='siblings',
+        inferred_relationship='unrelated',
+        relatedness=0.02,
+        ibs0=900,
+        ibs2=100,
+    )
+
+    assert flag.manually_resolved is False
+    assert flag.manual_resolution_reason is None
+    assert flag.manual_resolution_by is None
+
+
+def test_a_flag_stored_before_the_manual_fields_existed_still_deserialises():
+    """The fixture dict has none of the new keys, which is what Metamist holds for older flags."""
+    flag = SomalierRelatednessFlag(**relatedness_flag())
+
+    assert flag.manually_resolved is False
