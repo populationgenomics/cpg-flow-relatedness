@@ -382,10 +382,12 @@ def test_the_reason_and_reviewer_are_stored_stripped(metamist):
         (' y ', True),
         ('n', False),
         ('', False),
-        ('yes', False),
+        ('yes', True),
+        ('YES', True),
+        ('maybe', False),
     ],
 )
-def test_confirmed_only_accepts_an_explicit_lowercase_y(monkeypatch, typed, expected):
+def test_confirmed_accepts_only_an_explicit_affirmative(monkeypatch, typed, expected):
     """`confirmed` is the last thing standing between a curator and a production write."""
     monkeypatch.setattr('builtins.input', lambda _prompt: typed)
 

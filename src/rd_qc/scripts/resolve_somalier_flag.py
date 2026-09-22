@@ -191,13 +191,13 @@ def replace_flag(flags: list[dict], target: dict, replacement: dict) -> list[dic
 
 def confirmed() -> bool:
     """
-    Ask before writing. Anything other than an explicit 'y' is a no.
+    Ask before writing. Only an explicit 'y' or 'yes' is a yes; anything else is a no.
 
     A closed stdin (cron, CI, a wrapper that forgot --yes) or a Ctrl-C at the prompt both decline
     cleanly rather than raising, so the caller always gets EXIT_REFUSED instead of a traceback.
     """
     try:
-        return input('Write this change? [y/N] ').strip().lower() == 'y'
+        return input('Write this change? [y/N] ').strip().lower() in {'y', 'yes'}
     except EOFError:
         logger.error('No input available to confirm the write; pass --yes for non-interactive use.')
         return False
