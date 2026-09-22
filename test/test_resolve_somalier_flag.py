@@ -342,9 +342,19 @@ def test_assume_yes_skips_the_prompt(metamist, monkeypatch):
 
 
 @pytest.mark.parametrize('blank', ['', '   '])
-def test_an_empty_reason_or_reviewer_is_rejected_before_anything_is_read(metamist, blank):
-    """An unexplained suppression is worse than none, so this fails at the door."""
+def test_an_empty_reason_or_reviewer_is_rejected_before_anything_is_read(metamist, monkeypatch, blank):
+    """
+    An unexplained suppression is worse than none, so this fails at the door.
+
+    The read is patched to raise rather than merely asserting nothing was written: this CLI runs
+    against production Metamist, so a malformed invocation should not cost a round trip.
+    """
     metamist['stored'] = [relatedness_flag()]
+
+    def unreachable(*_: object) -> list[dict]:
+        raise AssertionError('Metamist must not be read when reason or reviewer is blank')
+
+    monkeypatch.setattr(cli, 'read_sg_flags', unreachable)
 
     assert run(metamist, reason=blank) == 2
     assert run(metamist, reviewer=blank) == 2
