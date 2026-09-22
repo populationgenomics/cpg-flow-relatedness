@@ -14,7 +14,6 @@ Run locally, against your own Metamist credentials:
 Take the SG IDs off the report row in either order. Add --unresolve to reopen a flag.
 """
 
-import json
 from argparse import ArgumentParser
 from datetime import UTC, datetime
 
@@ -29,25 +28,64 @@ EXIT_OK = 0
 EXIT_REFUSED = 1
 EXIT_BAD_ARGS = 2
 
+# The argument that reopens a flag, spelled once so the parser Task 6 adds cannot drift from the
+# refusal message below that tells a curator to use it.
+UNRESOLVE_ARG = '--unresolve'
+
+# Fields that distinguish flags of one category, for `describe`. Keyed the same way FLAG_CLASSES
+# is in somalier_flags_report.py, but this module only needs field names, not the dataclasses.
+CATEGORY_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
+    'sex_inference_mismatch': ('provided', 'inferred'),
+    'self_relatedness_mismatch': ('participant_external_id', 'threshold'),
+    'relatedness_mismatch': ('family_external_id', 'expected_relationship', 'inferred_relationship'),
+}
+
 
 def flag_key_of(sg_ids: list[str]) -> str:
     """The `sequencing_group_key` for these SG IDs, given in either order."""
     return sg_ids_tag(sg_ids)
 
 
-def owning_sg_id(sg_key: str) -> str:
+def owning_sg_id(sg_ids: list[str]) -> str:
     """
-    The sequencing group whose meta holds a flag with this key.
+    The sequencing group whose meta holds a flag for these SG IDs.
 
-    Pairwise flags are recorded against the sorted-first SG of the pair and the key is the sorted
-    join, so the owner is the first element.
+    Pairwise flags are recorded against the sorted-first SG of the pair, matching the convention
+    in check_pedigree.py and check_self_relatedness.py. A single-element list is a per-SG flag,
+    which is trivially its own owner.
     """
-    return sg_key.split('_', maxsplit=1)[0]
+    return sorted(sg_ids)[0]
 
 
-def describe(flags: list[dict]) -> str:
-    """One indented JSON line per flag, for printing candidates back to the curator."""
-    return '\n'.join(f'  {json.dumps(flag, sort_keys=True)}' for flag in flags)
+def flag_state(flag: dict) -> str:
+    """A flag's resolution state, as a curator reading a refusal message would want it summarised."""
+    if flag.get('manually_resolved'):
+        return (
+            f'held by {flag.get("manual_resolution_by")} on {flag.get("resolution_date")}: '
+            f'{flag.get("manual_resolution_reason")}'
+        )
+    if flag.get('resolved'):
+        return f'resolved {flag.get("resolution_date")}'
+    return 'active'
+
+
+def describe(flags: list[dict], sg_key: str) -> str:
+    """
+    One summary line per flag: category, sequencing group key, identity fields, and state.
+
+    A full flag dict is a several-hundred-character JSON blob dominated by `ar_guid`, `date` and
+    null manual-resolution fields that never distinguish two candidates; a curator picking between
+    them needs only what does. An unrecognised category prints with no identity fields rather than
+    raising, since this exists to help diagnose a mismatch, not to be another way to crash on one.
+    """
+    lines = []
+    for flag in flags:
+        category = flag.get('category')
+        fields = CATEGORY_IDENTITY_FIELDS.get(category, ())
+        identity = ' '.join(f'{field}={flag.get(field)}' for field in fields)
+        parts = [part for part in (category, sg_key, identity, flag_state(flag)) if part]
+        lines.append('  ' + ' '.join(parts))
+    return '\n'.join(lines)
 
 
 def matching_flags(flags: list[dict], sg_key: str, category: str, owner: str) -> list[dict]:
@@ -72,7 +110,7 @@ def select_target(
     owner: str,
     *,
     unresolve: bool,
-) -> tuple[dict | None, str]:
+) -> tuple[dict | None, str | None]:
     """
     The single flag to act on, or `None` and the reason why not.
 
@@ -86,28 +124,31 @@ def select_target(
     if not stored:
         return None, f'No {category} flag stored for {sg_key}. Check the SG IDs and the category.'
 
+    unresolved = [flag for flag in stored if not flag.get('resolved', False)]
+    held = [flag for flag in stored if flag.get('manually_resolved')]
+
     if unresolve:
-        candidates = [flag for flag in stored if flag.get('manually_resolved')]
+        candidates = held
         if not candidates:
-            return None, f'No manually resolved {category} flag for {sg_key}. Stored flags:\n{describe(stored)}'
+            return None, f'No manually resolved {category} flag for {sg_key}. Stored flags:\n{describe(stored, sg_key)}'
     else:
-        candidates = [flag for flag in stored if not flag.get('resolved', False)]
+        candidates = unresolved
+        if not candidates and held:
+            flag = held[0]
+            return None, (
+                f'{category} for {sg_key} is already manually resolved, on '
+                f'{flag.get("resolution_date")} by {flag.get("manual_resolution_by")}: '
+                f'{flag.get("manual_resolution_reason")}. Use {UNRESOLVE_ARG} to reopen it.'
+            )
         if not candidates:
-            already_held = [flag for flag in stored if flag.get('manually_resolved')]
-            if already_held:
-                flag = already_held[0]
-                return None, (
-                    f'{category} for {sg_key} is already manually resolved, on '
-                    f'{flag.get("resolution_date")} by {flag.get("manual_resolution_by")}: '
-                    f'{flag.get("manual_resolution_reason")}. Use --unresolve to reopen it.'
-                )
-            return None, f'No unresolved {category} flag for {sg_key}. Stored flags:\n{describe(stored)}'
+            return None, f'No unresolved {category} flag for {sg_key}. Stored flags:\n{describe(stored, sg_key)}'
 
     if len(candidates) > 1:
         return None, (
-            f'{len(candidates)} candidate {category} flags for {sg_key}; refusing to guess.\n{describe(candidates)}'
+            f'{len(candidates)} candidate {category} flags for {sg_key}; refusing to guess.\n'
+            f'{describe(candidates, sg_key)}'
         )
-    return candidates[0], ''
+    return candidates[0], None
 
 
 def with_manual_resolution(flag: dict, reason: str, reviewer: str, now: str) -> dict:

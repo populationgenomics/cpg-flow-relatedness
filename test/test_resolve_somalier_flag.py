@@ -49,7 +49,7 @@ def held(**overrides: object) -> dict:
     )
 
 
-def select(flags: list[dict], *, unresolve: bool = False) -> tuple[dict | None, str]:
+def select(flags: list[dict], *, unresolve: bool = False) -> tuple[dict | None, str | None]:
     return cli.select_target(flags, 'CPG1_CPG2', 'relatedness_mismatch', 'CPG1', unresolve=unresolve)
 
 
@@ -60,10 +60,10 @@ def test_flag_key_is_order_independent():
     assert cli.flag_key_of(['CPG1']) == 'CPG1'
 
 
-def test_owning_sg_is_the_first_of_the_key():
-    """Pairwise flags are recorded against the sorted-first SG, so the key names its own owner."""
-    assert cli.owning_sg_id('CPG1_CPG2') == 'CPG1'
-    assert cli.owning_sg_id('CPG1') == 'CPG1'
+def test_the_owning_sg_is_the_sorted_first_of_the_pair():
+    """Pairwise flags are recorded against the sorted-first SG of the pair."""
+    assert cli.owning_sg_id(['CPG2', 'CPG1']) == 'CPG1'
+    assert cli.owning_sg_id(['CPG1']) == 'CPG1'
 
 
 def test_the_one_unresolved_flag_is_selected():
@@ -72,7 +72,7 @@ def test_the_one_unresolved_flag_is_selected():
     selected, problem = select([target])
 
     assert selected is target
-    assert problem == ''
+    assert problem is None
 
 
 def test_resolution_history_does_not_make_the_match_ambiguous():
@@ -192,6 +192,36 @@ def test_replace_flag_swaps_one_entry_and_keeps_the_order():
     written = cli.replace_flag([first, target], target, replacement)
 
     assert written == [first, replacement]
+
+
+def test_a_legacy_per_sg_flag_without_a_recorded_key_matches_on_its_owner():
+    """
+    Sex flags are per-SG, not pairwise, so a legacy one exercises the per-SG fallback branch of
+    `sequencing_group_key` (falling back to the owning SG itself) rather than the pairwise branch
+    every other test in this file goes through.
+    """
+    sex_flag = {
+        'category': 'sex_inference_mismatch',
+        'date': FIRST_SEEN,
+        'resolved': False,
+        'resolution_date': None,
+        'manually_resolved': False,
+        'manual_resolution_reason': None,
+        'manual_resolution_by': None,
+        'provided': 'F',
+        'inferred': 'M',
+        'mean_depth': 30.0,
+        'x_het_ratio': 0.1,
+        'x_depth_ratio': 1.0,
+        'y_depth_ratio': 0.9,
+        'x_sites': 500,
+        'p_middling_ab': 0.02,
+    }
+
+    selected, problem = cli.select_target([sex_flag], 'CPG1', 'sex_inference_mismatch', 'CPG1', unresolve=False)
+
+    assert selected is sex_flag
+    assert problem is None
 
 
 def test_replace_flag_matches_on_identity_not_equality():
