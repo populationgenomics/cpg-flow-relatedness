@@ -11,7 +11,13 @@ FLAG = {'category': 'relatedness_mismatch', 'sg_id_1': 'CPG1', 'sg_id_2': 'CPG2'
 
 
 def fake_dataset(monkeypatch, sequencing_groups: list[dict]) -> dict:
-    """Patch `query` to answer the dataset read, and capture any mutation variables."""
+    """
+    Patch `query` to answer the dataset read, and capture any mutation variables.
+
+    This ignores which GraphQL document it was handed, so it answers every query with the same
+    read-shaped payload. Fine while there is one read and one mutation; a second read of a
+    different shape would get the wrong answer here rather than a loud failure.
+    """
     captured: dict = {}
 
     def fake_query(_query, variables=None) -> dict:
@@ -29,7 +35,19 @@ def test_read_sg_flags_returns_the_stored_list(monkeypatch):
 
 
 def test_read_sg_flags_returns_empty_for_a_sequencing_group_with_no_flags(monkeypatch):
-    """An SG that exists but has never been flagged is not the same as a missing SG."""
+    """
+    An SG that exists but has never been flagged is not the same as a missing SG.
+
+    Its meta is populated with other things, so this is the common real shape: the key is absent
+    rather than the meta being empty.
+    """
+    fake_dataset(monkeypatch, [{'id': 'CPG1', 'meta': {'sequencing_type': 'genome'}}])
+
+    assert flag_store.read_sg_flags('my-dataset', 'CPG1') == []
+
+
+def test_read_sg_flags_returns_empty_for_a_sequencing_group_with_null_meta(monkeypatch):
+    """Metamist returns meta as null rather than {} for some SGs, which must not raise."""
     fake_dataset(monkeypatch, [{'id': 'CPG1', 'meta': None}])
 
     assert flag_store.read_sg_flags('my-dataset', 'CPG1') == []

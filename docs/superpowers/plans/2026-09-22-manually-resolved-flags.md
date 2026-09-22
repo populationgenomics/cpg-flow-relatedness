@@ -166,7 +166,19 @@ def test_read_sg_flags_returns_the_stored_list(monkeypatch):
 
 
 def test_read_sg_flags_returns_empty_for_a_sequencing_group_with_no_flags(monkeypatch):
-    """An SG that exists but has never been flagged is not the same as a missing SG."""
+    """
+    An SG that exists but has never been flagged is not the same as a missing SG.
+
+    Its meta is populated with other things, so this is the common real shape: the key is absent
+    rather than the meta being empty.
+    """
+    fake_dataset(monkeypatch, [{'id': 'CPG1', 'meta': {'sequencing_type': 'genome'}}])
+
+    assert flag_store.read_sg_flags('my-dataset', 'CPG1') == []
+
+
+def test_read_sg_flags_returns_empty_for_a_sequencing_group_with_null_meta(monkeypatch):
+    """Metamist returns meta as null rather than {} for some SGs, which must not raise."""
     fake_dataset(monkeypatch, [{'id': 'CPG1', 'meta': None}])
 
     assert flag_store.read_sg_flags('my-dataset', 'CPG1') == []
