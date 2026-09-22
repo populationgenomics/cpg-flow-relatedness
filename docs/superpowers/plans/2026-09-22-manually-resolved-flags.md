@@ -1079,7 +1079,7 @@ def replace_flag(flags: list[dict], target: dict, replacement: dict) -> list[dic
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest test/test_resolve_somalier_flag.py -q`
-Expected: PASS, all 18 tests.
+Expected: PASS, all 16 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1259,7 +1259,7 @@ def main(
         return EXIT_BAD_ARGS
 
     sg_key = flag_key_of(sg_ids)
-    owner = owning_sg_id(sg_key)
+    owner = owning_sg_id(sg_ids)
 
     flags = read_sg_flags(dataset, owner)
     if flags is None:
@@ -1272,7 +1272,7 @@ def main(
         return EXIT_REFUSED
 
     action = 'Reopening' if unresolve else 'Manually resolving'
-    logger.info(f'{action} this flag on {owner} in {dataset}:\n{describe([target])}')
+    logger.info(f'{action} this flag on {owner} in {dataset}:\n{describe([target], sg_key)}')
     if not assume_yes and not confirmed():
         logger.info('Aborted, nothing written.')
         return EXIT_REFUSED
@@ -1301,7 +1301,7 @@ def cli_main() -> int:
     parser.add_argument('--reason', required=True, help='Why this finding is accepted as-is')
     parser.add_argument('--reviewer', required=True, help='Who decided')
     parser.add_argument(
-        '--unresolve',
+        UNRESOLVE_ARG,
         action='store_true',
         help='Reopen a manually resolved flag instead, so it returns to the report',
     )
