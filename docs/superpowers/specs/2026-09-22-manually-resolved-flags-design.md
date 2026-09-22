@@ -94,6 +94,12 @@ One skip at the top of the loop in `collect_somalier_flags` (`somalier_flags_rep
 
 That function is the only place flags enter the report, so a flag dropped there is absent from all four sections, from every count in the summary cards, and from the Slack post, with no other file touched. Manually resolved flags are invisible in the report, not shown as a count.
 
+### Accepted consequence: the Slack delta
+
+The Slack post compares each run's summary against the previous run's stored numbers. Before this feature, a drop in `active_conflicts` was always paired with a rise in `resolved_flags`, because a flag that stopped being measured moved from one bucket to the other. A held flag is in neither bucket, so the first run after a curator holds a conflict the message reads ` - 1 fewer conflict` on its own, with nothing beside it, which a reader can take as "the conflict was fixed" rather than "nobody is going to fix it". Holding a refinement produces no line at all, because `_change_lines` has no negative branch for refinements, so the message can say `No change since the last report`.
+
+Left as-is deliberately. The HTML report is the source of truth and the Slack line is a nudge to go read it, so the wording is not worth the churn. Recorded here because the line's meaning quietly changed underneath it, and anyone who later finds it confusing should know it was weighed rather than missed. The cheap fix, if it becomes a problem, is to reword the decrease as resolution-neutral (` - 1 conflict no longer shown`) and leave `resolved_flags` as the only line claiming an actual fix; that needs no new plumbing.
+
 A count in the summary bar was the other option. It would mean threading a number through `summarise_flags`, `render_report`, the template, `_headline_lines` and the previous-run delta comparison (`somalier_flags_report.py:1039`), which is a lot of plumbing for one number. It stays available as a later addition if the invisibility turns out to be a problem, since the records themselves are untouched in Metamist.
 
 ## Testing
