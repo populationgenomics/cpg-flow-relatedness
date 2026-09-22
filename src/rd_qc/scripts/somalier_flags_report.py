@@ -441,17 +441,20 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
     on one bad meta entry is worse than one that renders the other ninety-nine.
     """
     collected: list[SgFlags] = []
+    held_count = 0
     for sg in sequencing_groups:
         meta = sg.get('meta') or {}
         flags: list[SomalierFlag] = []
-        for raw in meta.get('somalier_flags') or []:
-            if (raw or {}).get('manually_resolved'):
+        for entry in meta.get('somalier_flags') or []:
+            raw = entry or {}
+            if raw.get('manually_resolved'):
                 # Reviewed and accepted by a curator, so it is not a finding this report is for.
                 # Dropped here rather than downstream because this is the only way flags enter the
                 # report: skipping here keeps it out of all four sections and every summary count.
-                logger.debug(f'{sg["id"]} :: skipping manually resolved Somalier flag')
+                logger.info(f'{sg["id"]} :: skipping manually resolved Somalier flag')
+                held_count += 1
                 continue
-            category = (raw or {}).get('category') or ''
+            category = raw.get('category') or ''
             flag_class = FLAG_CLASSES.get(category)
             if flag_class is None:
                 logger.warning(f'{sg["id"]} :: skipping Somalier flag with unrecognised category {category!r}')
@@ -461,6 +464,10 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
             except TypeError as exc:
                 logger.warning(f'{sg["id"]} :: skipping malformed {category} flag: {exc}')
         collected.append(SgFlags(sg_id=sg['id'], flags=tuple(flags)))
+    if held_count:
+        # The report shows held flags nowhere, so this line is the only place an operator can see
+        # that findings were suppressed without querying Metamist.
+        logger.info(f'Left {held_count} manually resolved Somalier flag(s) out of the report.')
     return collected
 
 

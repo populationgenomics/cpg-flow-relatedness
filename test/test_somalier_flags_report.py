@@ -142,6 +142,45 @@ def test_collect_skips_a_manually_resolved_flag():
     assert collected[0].flags == ()
 
 
+def test_holding_one_flag_takes_nothing_else_with_it():
+    """
+    A held flag removes itself from the report and no more than itself.
+
+    The hold-everything test below cannot see this: a skip that also swallowed a sibling produces
+    the same empty report as a correct one. CPG004 carries three flags, so holding one of them
+    pins that its two siblings survive.
+    """
+    target_sg_id = 'CPG004'
+    stored = next(sg['meta']['somalier_flags'] for sg in MOCK_SEQUENCING_GROUPS if sg['id'] == target_sg_id)
+    assert len(stored) >= 2, 'this test needs an SG with siblings to lose'
+
+    groups = [
+        {
+            'id': sg['id'],
+            'meta': {
+                'somalier_flags': [
+                    # Hold only the first flag on the target SG; its siblings stay as they are.
+                    flag | HELD if sg['id'] == target_sg_id and index == 0 else flag
+                    for index, flag in enumerate((sg['meta'] or {}).get('somalier_flags', []))
+                ]
+            },
+        }
+        for sg in MOCK_SEQUENCING_GROUPS
+    ]
+
+    baseline_flagged, _, _, baseline = run_pipeline()
+    flagged, _, _, summary = run_pipeline(groups)
+
+    baseline_per_sg = {sf.sg_id: len(sf.flags) for sf in baseline_flagged}
+    per_sg = {sf.sg_id: len(sf.flags) for sf in flagged}
+
+    assert per_sg[target_sg_id] == baseline_per_sg[target_sg_id] - 1, 'exactly one flag left the report'
+    assert summary['active_flags'] == baseline['active_flags'] - 1
+    for sg_id, count in baseline_per_sg.items():
+        if sg_id != target_sg_id:
+            assert per_sg.get(sg_id, 0) == count, f'{sg_id} lost a flag it should have kept'
+
+
 def test_manually_resolved_flags_reach_no_section_and_no_count():
     """
     Held flags are invisible, not merely de-emphasised.
