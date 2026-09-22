@@ -186,3 +186,84 @@ def test_a_flag_stored_before_the_manual_fields_existed_still_deserialises():
     assert flag.manually_resolved is False
     assert flag.manual_resolution_reason is None
     assert flag.manual_resolution_by is None
+
+
+def manually_resolved(flag: dict, **overrides: object) -> dict:
+    """`flag` as the resolve CLI leaves it: resolved, with the reviewer's reason attached."""
+    return (
+        flag
+        | {
+            'resolved': True,
+            'resolution_date': RESOLVED_EARLIER,
+            'manually_resolved': True,
+            'manual_resolution_reason': 'pedigree known wrong',
+            'manual_resolution_by': 'ef',
+        }
+        | overrides
+    )
+
+
+def test_manually_resolved_flag_stays_resolved_when_the_finding_recurs(written_meta):
+    """
+    The whole point of the feature: a run that measures the same thing again must not reopen it.
+
+    Without the manual branch this flag falls through compare_* into the overwrite branch, which
+    sets resolved=False and leaves the manual fields on an active flag.
+    """
+    held = manually_resolved(relatedness_flag())
+    recurrence = relatedness_flag(date=TODAY, relatedness=0.05, ibs0=850, ibs2=120)
+
+    reconcile(current_flags=[held], new_flags=[recurrence])
+
+    written = flags_by_category(written_meta)['relatedness_mismatch']
+    assert written['resolved'] is True
+    assert written['manually_resolved'] is True
+    assert written['manual_resolution_by'] == 'ef'
+    assert written['manual_resolution_reason'] == 'pedigree known wrong'
+    assert written['resolution_date'] == RESOLVED_EARLIER, 'the reviewer resolved it, not this run'
+    assert written['date'] == FIRST_SEEN, 'a held issue keeps its first-detected date'
+    assert (written['relatedness'], written['ibs0'], written['ibs2']) == (0.05, 850, 120)
+
+
+def test_a_changed_finding_is_not_suppressed_by_a_manual_resolution(written_meta):
+    """
+    Binding is strict: the marker is on one record, so a different measurement surfaces unheld.
+
+    This is the safety property. A pair accepted as parent-child must not stay quiet when the
+    genotypes start saying unrelated.
+    """
+    held = manually_resolved(relatedness_flag())
+    reinferred = relatedness_flag(inferred_relationship='parent-child')
+
+    reconcile(current_flags=[held], new_flags=[reinferred])
+
+    written = written_meta['sgMeta']['somalier_flags']
+    assert len(written) == 2
+
+    by_inferred = {flag['inferred_relationship']: flag for flag in written}
+    assert by_inferred['unrelated']['manually_resolved'] is True
+    assert by_inferred['parent-child']['resolved'] is False
+    assert by_inferred['parent-child']['manually_resolved'] is False
+
+
+def test_a_manually_resolved_flag_stays_held_when_the_finding_disappears(written_meta):
+    """An accepted finding that later goes away keeps its marker and stays out of the report."""
+    held = manually_resolved(relatedness_flag())
+
+    reconcile(current_flags=[held], new_flags=[sex_flag()])
+
+    written = flags_by_category(written_meta)['relatedness_mismatch']
+    assert written['manually_resolved'] is True
+    assert written['resolution_date'] == RESOLVED_EARLIER, 'the resolution date is not re-stamped'
+
+
+def test_manual_resolution_is_held_for_every_category(written_meta):
+    """The branch is duplicated across three reconcilers, so all three get pinned."""
+    held_sex = manually_resolved(sex_flag())
+
+    reconcile(current_flags=[held_sex], new_flags=[sex_flag(mean_depth=29.0)])
+
+    written = flags_by_category(written_meta)['sex_inference_mismatch']
+    assert written['resolved'] is True
+    assert written['manually_resolved'] is True
+    assert written['mean_depth'] == 29.0, 'measured values still refresh while held'

@@ -9,6 +9,23 @@ from loguru import logger
 from rd_qc.flag_store import SOMALIER_FLAGS_KEY, read_dataset_sg_meta, sequencing_group_key, write_sg_flags
 from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
 
+# The measured fields each category refreshes on a flag it is keeping. Identity fields are absent
+# by construction: a change in any of those makes a different flag, not an update to this one.
+SEX_MEASURED_FIELDS = ('mean_depth', 'x_het_ratio', 'x_depth_ratio', 'y_depth_ratio', 'p_middling_ab')
+SELF_RELATEDNESS_MEASURED_FIELDS = ('relatedness', 'ibs0', 'ibs2')
+# `verdict` is derived from the measured values, so it refreshes with them.
+RELATEDNESS_MEASURED_FIELDS = ('relatedness', 'ibs0', 'ibs2', 'verdict')
+
+
+def refresh_measured_values(flag: dict, new_flag: dict, fields: tuple[str, ...]) -> None:
+    """
+    Copy this run's measurements onto a flag being kept, leaving identity and resolution alone.
+
+    Mutates in place, matching how the reconcilers below already update these dicts. A field the
+    new flag does not carry is left as it was rather than blanked.
+    """
+    flag.update({field: new_flag[field] for field in fields if field in new_flag})
+
 
 def compare_somalier_sex_inference_flag(current_flag: dict, new_flag: dict) -> bool:
     """
@@ -70,7 +87,7 @@ def reconcile_sg_somalier_sex_inference_flags(
         if flag.get('category') == 'sex_inference_mismatch'
     }
     final_flags: list[SomalierSexInferenceFlag] = []
-    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
+    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0, 'held': 0}
     sg_id = sg['id']
     report = 'Somalier sex inference'
     logger.info(f'{sg_id} :: Found {len(existing_flags_by_key)} existing {report} flags. Reconciling.')
@@ -85,16 +102,21 @@ def reconcile_sg_somalier_sex_inference_flags(
             else:
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' remains resolved.")
+        elif flag.get('manually_resolved'):
+            # Reviewed and accepted by a curator. The finding is still here, so take this run's
+            # measurements but leave the resolution alone. Without this branch the flag falls
+            # through compare_* (which requires an unresolved flag) into the overwrite below,
+            # which would reopen it every run.
+            refresh_measured_values(flag, new_somalier_sex_inference_flags_by_key[flag_key], SEX_MEASURED_FIELDS)
+            logger.info(
+                f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' "
+                f'manually resolved by {flag.get("manual_resolution_by")}; held.'
+            )
+            stats['held'] += 1
         elif compare_somalier_sex_inference_flag(flag, new_somalier_sex_inference_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (provided/inferred) is unchanged so this counts as 'retained', not 'updated'.
-            new_flag = new_somalier_sex_inference_flags_by_key[flag_key]
-            flag.update(
-                {
-                    key: new_flag[key]
-                    for key in ['mean_depth', 'x_het_ratio', 'x_depth_ratio', 'y_depth_ratio', 'p_middling_ab']
-                }
-            )
+            refresh_measured_values(flag, new_somalier_sex_inference_flags_by_key[flag_key], SEX_MEASURED_FIELDS)
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' "
                 'remains unresolved (value refreshed).'
@@ -136,7 +158,7 @@ def reconcile_sg_somalier_self_relatedness_flags(
         if f.get('category') == 'self_relatedness_mismatch'
     }
     final_flags: list[SomalierSelfRelatednessFlag] = []
-    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
+    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0, 'held': 0}
     sg_id = sg['id']
     report = 'Somalier self relatedness'
     logger.info(f'{sg_id} :: Found {len(existing_flags_by_key)} existing {report} flags. Reconciling.')
@@ -151,14 +173,27 @@ def reconcile_sg_somalier_self_relatedness_flags(
             else:
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' remains resolved.")
+        elif flag.get('manually_resolved'):
+            # See the sex reconciler above: held across runs, measurements still refreshed.
+            refresh_measured_values(
+                flag,
+                new_somalier_self_relatedness_flags_by_key[flag_key],
+                SELF_RELATEDNESS_MEASURED_FIELDS,
+            )
+            logger.info(
+                f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' "
+                f'manually resolved by {flag.get("manual_resolution_by")}; held.'
+            )
+            stats['held'] += 1
         elif compare_somalier_self_relatedness_flag(flag, new_somalier_self_relatedness_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and
             # but keep resolution status. Identity (sg_id_1/sg_id_2/participant_external_id/threshold)
             # is unchanged so this counts as 'retained', not 'updated'.
-            new_flag = new_somalier_self_relatedness_flags_by_key[flag_key]
-            flag['relatedness'] = new_flag['relatedness']
-            flag['ibs0'] = new_flag['ibs0']
-            flag['ibs2'] = new_flag['ibs2']
+            refresh_measured_values(
+                flag,
+                new_somalier_self_relatedness_flags_by_key[flag_key],
+                SELF_RELATEDNESS_MEASURED_FIELDS,
+            )
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' remains unresolved (value refreshed)."
             )
@@ -197,7 +232,7 @@ def reconcile_sg_somalier_relatedness_flags(
         if f.get('category') == 'relatedness_mismatch'
     }
     final_flags: list[SomalierRelatednessFlag] = []
-    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
+    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0, 'held': 0}
     sg_id = sg['id']
     report = 'Somalier relatedness'
     logger.info(f'{sg_id} :: Found {len(existing_flags_by_key)} existing {report} flags. Reconciling.')
@@ -212,16 +247,19 @@ def reconcile_sg_somalier_relatedness_flags(
             else:
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['category']}' remains resolved.")
+        elif flag.get('manually_resolved'):
+            # See the sex reconciler above: held across runs, measurements still refreshed.
+            refresh_measured_values(flag, new_somalier_relatedness_flags_by_key[flag_key], RELATEDNESS_MEASURED_FIELDS)
+            logger.info(
+                f"{sg_id} :: {report} flag '{flag['category']}' "
+                f'manually resolved by {flag.get("manual_resolution_by")}; held.'
+            )
+            stats['held'] += 1
         elif compare_somalier_relatedness_flag(flag, new_somalier_relatedness_flags_by_key[flag_key]):
             # Same unresolved issue is still present: refresh the measured value and but keep resolution status.
             # Identity (sg_id_1/sg_id_2/family_external_id/expected_relationship/inferred_relationship)  # noqa: ERA001
             # is unchanged so this counts as 'retained', not 'updated'.
-            new_flag = new_somalier_relatedness_flags_by_key[flag_key]
-            flag['relatedness'] = new_flag['relatedness']
-            flag['ibs0'] = new_flag['ibs0']
-            flag['ibs2'] = new_flag['ibs2']
-            # Derived from the measured values, so it refreshes with them.
-            flag['verdict'] = new_flag.get('verdict', '')
+            refresh_measured_values(flag, new_somalier_relatedness_flags_by_key[flag_key], RELATEDNESS_MEASURED_FIELDS)
             logger.info(f"{sg_id} :: {report} flag '{flag['category']}' remains unresolved (value refreshed).")
             stats['retained'] += 1
         else:
@@ -292,7 +330,7 @@ def reconcile_sg_somalier_flags(
 
     # Track the final set of flags to be recorded in Metamist, including resolved, retained, updated, and added flags
     final_flags: list[SomalierSexInferenceFlag | SomalierSelfRelatednessFlag | SomalierRelatednessFlag] = []
-    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0}
+    stats = {'resolved': 0, 'retained': 0, 'updated': 0, 'added': 0, 'held': 0}
 
     logger.info(f'{sg_id} :: Found {len(current_somalier_flags)} existing {report} flags. Reconciling.')
 
@@ -331,7 +369,8 @@ def reconcile_sg_somalier_flags(
     logger.info(
         f'{sg_id} :: Recorded {len(final_flags)} {report} flags in Metamist. '
         f'Resolved: {stats["resolved"]}, Retained: {stats["retained"]}, '
-        f'Updated: {stats["updated"]}, Added: {stats["added"]}'
+        f'Updated: {stats["updated"]}, Added: {stats["added"]}, '
+        f'Manually resolved: {stats["held"]}'
     )
 
 
