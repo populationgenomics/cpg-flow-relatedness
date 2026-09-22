@@ -8,6 +8,7 @@ rather than silently dropped.
 
 import pytest
 
+from rd_qc import flag_store
 from rd_qc.scripts import record_somalier_flags
 from rd_qc.utils import SomalierRelatednessFlag
 
@@ -67,7 +68,7 @@ def written_meta(monkeypatch):
         captured.update(variables or {})
         return {}
 
-    monkeypatch.setattr(record_somalier_flags, 'query', fake_query)
+    monkeypatch.setattr(flag_store, 'query', fake_query)
     return captured
 
 

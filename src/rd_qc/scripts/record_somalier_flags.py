@@ -6,53 +6,8 @@ from datetime import UTC, datetime
 
 from loguru import logger
 
-from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag, sg_ids_tag
-
-from metamist.graphql import gql, query
-
-DATASET_SG_META_QUERY = gql(
-    """
-    query datasetSgMeta($dataset: String!) {
-        project(name: $dataset) {
-            sequencingGroups {
-                id
-                meta
-            }
-        }
-    }
-    """
-)
-
-SG_META_MUTATION = gql(
-    """
-    mutation updateSgMeta($dataset: String!, $sgId: String!, $sgMeta: JSON!) {
-        sequencingGroup {
-            updateSequencingGroup(
-                project: $dataset
-                sequencingGroup: {id: $sgId, meta: $sgMeta}
-            ) {
-                id
-                meta
-            }
-        }
-    }
-    """
-)
-
-
-def sequencing_group_key(flag: dict, sg_id: str) -> str:
-    """
-    Sorted, underscore-joined SG IDs that this flag involves.
-
-    Pairwise flags (self-relatedness, relatedness) are about two SGs but are recorded against
-    only the first of the pair, so this key is what lets a reader work out which SGs a flag
-    touches without needing per-category knowledge of where the partner ID lives. Per-SG flags
-    (sex inference) key on the SG that owns them.
-    """
-    sg_id_1, sg_id_2 = flag.get('sg_id_1'), flag.get('sg_id_2')
-    if sg_id_1 and sg_id_2:
-        return sg_ids_tag([sg_id_1, sg_id_2])
-    return sg_id
+from rd_qc.flag_store import SOMALIER_FLAGS_KEY, read_dataset_sg_meta, sequencing_group_key, write_sg_flags
+from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
 
 
 def compare_somalier_sex_inference_flag(current_flag: dict, new_flag: dict) -> bool:
@@ -301,9 +256,7 @@ def reconcile_sg_somalier_flags(
     sg_id = sg['id']
     report = 'Somalier'
     # Get all the existing relatedness flags of the specified type for this SG
-    somalier_flags_key = 'somalier_flags'
-
-    current_somalier_flags: list[dict] = (sg['meta'] or {}).get(somalier_flags_key, [])
+    current_somalier_flags: list[dict] = (sg['meta'] or {}).get(SOMALIER_FLAGS_KEY, [])
     unresolved_current_flags = [flag for flag in current_somalier_flags if not flag.get('resolved', False)]
 
     new_somalier_flags: list[dict] = new_flags_by_sg.get(sg_id, [])
@@ -374,14 +327,7 @@ def reconcile_sg_somalier_flags(
     final_flags.extend(relatedness_final_flags)
 
     # Perform the mutation to update the SG meta
-    query(
-        SG_META_MUTATION,
-        variables={
-            'dataset': dataset,
-            'sgId': sg_id,
-            'sgMeta': {somalier_flags_key: [asdict(flag) for flag in final_flags]},
-        },
-    )
+    write_sg_flags(dataset, sg_id, [asdict(flag) for flag in final_flags])
     logger.info(
         f'{sg_id} :: Recorded {len(final_flags)} {report} flags in Metamist. '
         f'Resolved: {stats["resolved"]}, Retained: {stats["retained"]}, '
@@ -419,8 +365,7 @@ def main(
         somalier_relatedness_data = json.load(f)
 
     # Query the sequencing groups for the given dataset
-    response = query(DATASET_SG_META_QUERY, variables={'dataset': dataset})
-    sequencing_groups = response['project']['sequencingGroups']
+    sequencing_groups = read_dataset_sg_meta(dataset)
 
     # Reconcile each sequencing group's Somalier flags
     new_flags_by_sg: dict[str, list[dict]] = {}
