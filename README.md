@@ -36,7 +36,7 @@ resolve_somalier_flag --dataset my-dataset --sg-ids CPG001 CPG002 \
     --category relatedness_mismatch --reason "pedigree known wrong" --reviewer ef
 ```
 
-Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report entirely rather than shown as resolved history. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. `--unresolve` reverses it.
+Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report, and the Slack summary counts, entirely rather than shown as resolved history. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. `--unresolve` reverses it.
 
 ## Relatedness inferences
 
