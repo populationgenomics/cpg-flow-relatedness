@@ -41,8 +41,8 @@ It is *not* unique across the whole stored list, because resolution history accu
 
 `src/rd_qc/scripts/resolve_somalier_flag.py`, with a `resolve_somalier_flag` entry point in `pyproject.toml` alongside `run_workflow`. It runs locally, against the curator's own Metamist credentials, not inside a Hail Batch job.
 
-```
-resolve_somalier_flag --dataset acute-care \
+```bash
+resolve_somalier_flag --dataset my-dataset \
   --sg-ids CPG001 CPG002 \
   --category relatedness_mismatch \
   --reason "pedigree known wrong, family declined correction" \
