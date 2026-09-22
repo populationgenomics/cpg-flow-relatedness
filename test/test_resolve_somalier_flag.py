@@ -245,9 +245,10 @@ def metamist(monkeypatch):
 
     `written` stays empty when nothing was written, which is what every refusal must produce.
     """
-    state: dict = {'stored': [], 'written': {}}
+    state: dict = {'stored': [], 'written': {}, 'read_args': None}
 
-    def fake_read(_dataset: str, _sg_id: str) -> list[dict]:
+    def fake_read(dataset: str, sg_id: str) -> list[dict]:
+        state['read_args'] = (dataset, sg_id)
         return state['stored']
 
     def fake_write(dataset: str, sg_id: str, flags: list[dict]) -> None:
@@ -277,6 +278,8 @@ def test_resolving_writes_the_marked_flag_against_the_owning_sg(metamist):
     metamist['stored'] = [relatedness_flag()]
 
     assert run(metamist) == 0
+
+    assert metamist['read_args'] == ('my-dataset', 'CPG1'), 'the owning SG is read, not sg_ids[0]'
 
     written = metamist['written']
     assert written['dataset'] == 'my-dataset'
@@ -369,3 +372,88 @@ def test_the_reason_and_reviewer_are_stored_stripped(metamist):
     written = metamist['written']['flags'][0]
     assert written['manual_resolution_reason'] == REASON
     assert written['manual_resolution_by'] == 'ef'
+
+
+@pytest.mark.parametrize(
+    ('typed', 'expected'),
+    [
+        ('y', True),
+        ('Y', True),
+        (' y ', True),
+        ('n', False),
+        ('', False),
+        ('yes', False),
+    ],
+)
+def test_confirmed_only_accepts_an_explicit_lowercase_y(monkeypatch, typed, expected):
+    """`confirmed` is the last thing standing between a curator and a production write."""
+    monkeypatch.setattr('builtins.input', lambda _prompt: typed)
+
+    assert cli.confirmed() is expected
+
+
+def test_confirmed_declines_cleanly_when_stdin_is_closed(monkeypatch):
+    """cron, CI, or a wrapper that forgot --yes closes stdin; that must decline, not traceback."""
+
+    def raise_eof(_prompt: str) -> str:
+        raise EOFError
+
+    monkeypatch.setattr('builtins.input', raise_eof)
+
+    assert cli.confirmed() is False
+
+
+def test_confirmed_declines_cleanly_on_keyboard_interrupt(monkeypatch):
+    """A curator hitting Ctrl-C at the prompt is a clean decline, not a traceback."""
+
+    def raise_interrupt(_prompt: str) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr('builtins.input', raise_interrupt)
+
+    assert cli.confirmed() is False
+
+
+def test_cli_main_maps_every_argument_to_the_right_main_parameter(monkeypatch):
+    """
+    A typo like `unresolve=args.assume_yes` is valid Python and would ship silently.
+
+    --unresolve is passed without --yes so the two flags disagree, which is what would catch them
+    being swapped.
+    """
+    captured: dict = {}
+
+    def fake_main(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, 'main', fake_main)
+    monkeypatch.setattr(
+        'sys.argv',
+        [
+            'resolve_somalier_flag',
+            '--dataset',
+            'my-dataset',
+            '--sg-ids',
+            'CPG2',
+            'CPG1',
+            '--category',
+            'relatedness_mismatch',
+            '--reason',
+            REASON,
+            '--reviewer',
+            REVIEWER,
+            '--unresolve',
+        ],
+    )
+
+    assert cli.cli_main() == 0
+    assert captured == {
+        'dataset': 'my-dataset',
+        'sg_ids': ['CPG2', 'CPG1'],
+        'category': 'relatedness_mismatch',
+        'reason': REASON,
+        'reviewer': REVIEWER,
+        'unresolve': True,
+        'assume_yes': False,
+    }

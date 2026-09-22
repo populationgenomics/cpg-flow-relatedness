@@ -26,6 +26,7 @@ CATEGORIES = ('sex_inference_mismatch', 'self_relatedness_mismatch', 'relatednes
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
+# Deliberately matches argparse's own exit code for a bad invocation: both mean the same thing to a caller.
 EXIT_BAD_ARGS = 2
 
 # The argument that reopens a flag, spelled once so the parser Task 6 adds cannot drift from the
@@ -189,8 +190,20 @@ def replace_flag(flags: list[dict], target: dict, replacement: dict) -> list[dic
 
 
 def confirmed() -> bool:
-    """Ask before writing. Anything other than an explicit 'y' is a no."""
-    return input('Write this change? [y/N] ').strip().lower() == 'y'
+    """
+    Ask before writing. Anything other than an explicit 'y' is a no.
+
+    A closed stdin (cron, CI, a wrapper that forgot --yes) or a Ctrl-C at the prompt both decline
+    cleanly rather than raising, so the caller always gets EXIT_REFUSED instead of a traceback.
+    """
+    try:
+        return input('Write this change? [y/N] ').strip().lower() == 'y'
+    except EOFError:
+        logger.error('No input available to confirm the write; pass --yes for non-interactive use.')
+        return False
+    except KeyboardInterrupt:
+        logger.error('Interrupted before confirming; nothing written.')
+        return False
 
 
 def main(
@@ -211,6 +224,8 @@ def main(
     if not reason.strip() or not reviewer.strip():
         logger.error('--reason and --reviewer must both be non-empty.')
         return EXIT_BAD_ARGS
+    reason = reason.strip()
+    reviewer = reviewer.strip()
 
     sg_key = flag_key_of(sg_ids)
     owner = owning_sg_id(sg_ids)
@@ -227,15 +242,15 @@ def main(
 
     action = 'Reopening' if unresolve else 'Manually resolving'
     logger.info(f'{action} this flag on {owner} in {dataset}:\n{describe([target], sg_key)}')
+    detail = 'Clearing the manual resolution.' if unresolve else f'Recording: reviewer={reviewer} reason={reason}'
+    logger.info(f'{detail}\nThis write replaces all {len(flags)} flag(s) stored on {owner}.')
     if not assume_yes and not confirmed():
         logger.info('Aborted, nothing written.')
         return EXIT_REFUSED
 
     now = datetime.now(tz=UTC).isoformat(timespec='seconds')
     replacement = (
-        without_manual_resolution(target)
-        if unresolve
-        else with_manual_resolution(target, reason.strip(), reviewer.strip(), now)
+        without_manual_resolution(target) if unresolve else with_manual_resolution(target, reason, reviewer, now)
     )
     write_sg_flags(dataset, owner, replace_flag(flags, target, replacement))
     logger.info(f'Wrote {len(flags)} flags back to {owner} in {dataset}.')
