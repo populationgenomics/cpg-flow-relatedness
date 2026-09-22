@@ -22,7 +22,7 @@ Pairwise flags (a pair of SGs) are recorded against the **sorted-first** SG of t
 
 Nothing here touches Hail Batch. The CLI runs on a laptop; the reconciler runs inside a Batch job via `python3 -m rd_qc.scripts.record_somalier_flags` (`jobs/relate.py:214`).
 
-**Run tests with:** `uv run pytest test -q` from the repo root. `pythonpath = ['src']` is set in `pyproject.toml`, so no install step is needed. Ruff runs via pre-commit: `uv run ruff check src test` and `uv run ruff format src test`.
+**Run tests with:** `uv run pytest test -q` from the repo root. `pythonpath = ['src']` is set in `pyproject.toml`, so no install step is needed. Ruff runs via pre-commit, and is not a project dependency, so invoke it with the version pre-commit pins: `uv run --with ruff==0.15.19 ruff check src test` and `uv run --with ruff==0.15.19 ruff format src test`.
 
 ## File structure
 
@@ -1416,8 +1416,10 @@ Expected: `flag_store.py`, `resolve_somalier_flag.py` and the changed branches i
 
 - [ ] **Step 3: Lint and format**
 
-Run: `uv run ruff check src test && uv run ruff format --check src test`
-Expected: no findings. Fix anything reported with `uv run ruff format src test` and re-run.
+`ruff` is not a project dependency, so plain `uv run ruff` fails with "Failed to spawn". The version is pinned to match `.pre-commit-config.yaml`, because a newer ruff turns on `PLR0917` and reports 11 pre-existing findings in files this work does not touch.
+
+Run: `uv run --with ruff==0.15.19 ruff check src test && uv run --with ruff==0.15.19 ruff format --check src test`
+Expected: `All checks passed!` and `N files already formatted`. Fix anything reported with `uv run --with ruff==0.15.19 ruff format src test` and re-run.
 
 - [ ] **Step 4: Bump the version**
 

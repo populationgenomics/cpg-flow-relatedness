@@ -183,3 +183,5 @@ def test_a_flag_stored_before_the_manual_fields_existed_still_deserialises():
     flag = SomalierRelatednessFlag(**relatedness_flag())
 
     assert flag.manually_resolved is False
+    assert flag.manual_resolution_reason is None
+    assert flag.manual_resolution_by is None
