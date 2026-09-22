@@ -29,6 +29,15 @@ Three categories of flag are recorded, each keyed by its own attributes:
 
 Flags persist across runs. A flag that reappears is updated in place, and one that no longer applies is marked resolved with a date rather than deleted, so the report can show a backlog of past findings alongside current ones.
 
+A flag that is real but accepted, such as a pedigree known to be wrong that will not be corrected, can be resolved by hand:
+
+```bash
+resolve_somalier_flag --dataset my-dataset --sg-ids CPG001 CPG002 \
+    --category relatedness_mismatch --reason "pedigree known wrong" --reviewer ef
+```
+
+Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report entirely rather than shown as resolved history. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. `--unresolve` reverses it.
+
 ## Relatedness inferences
 
 Relationships are inferred from what Somalier measured, rather than from its `somalier relate --infer` pedigree reconstruction. Each pair's kinship coefficient places it in a degree band (identical, parent-child, siblings, second-, third-degree, unrelated), with IBS0 separating parent-child from full siblings. That measured degree is then compared against the degrees the recorded pedigree allows.
@@ -49,6 +58,7 @@ src
 └── rd_qc
     ├── run_workflow.py
     ├── config_template.toml
+    ├── flag_store.py
     ├── stages.py
     ├── utils.py
     ├── jobs
@@ -59,6 +69,7 @@ src
     │   ├── check_pedigree.py
     │   ├── check_self_relatedness.py
     │   ├── record_somalier_flags.py
+    │   ├── resolve_somalier_flag.py
     │   └── somalier_flags_report.py
     └── templates
         └── somalier_flags_overview.html.jinja
@@ -76,6 +87,8 @@ src
 - `GenerateSomalierFlagsReport` — renders every flag recorded in Metamist into the HTML report
 
 `utils.py` contains the flag dataclasses, the relatedness inference and verdict logic, and utility functions for querying Metamist and building PED files.
+
+`flag_store.py` is the only module that reads or writes the `somalier_flags` list on a sequencing group's meta. The mutation replaces the whole list, so both the pipeline's reconciler and `resolve_somalier_flag` go through it.
 
 `jobs/` contains the Hail Batch job builders. `scripts/` contains the post-processing scripts those jobs run.
 
