@@ -6,11 +6,20 @@ that overwrite — in particular that flag categories absent from the current ru
 rather than silently dropped.
 """
 
+from dataclasses import asdict
+
 import pytest
 
 from rd_qc import flag_store
+from rd_qc.flag_store import sequencing_group_key
 from rd_qc.scripts import record_somalier_flags
-from rd_qc.utils import SomalierRelatednessFlag
+from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
+
+FLAG_CLASSES = {
+    'sex_inference_mismatch': SomalierSexInferenceFlag,
+    'self_relatedness_mismatch': SomalierSelfRelatednessFlag,
+    'relatedness_mismatch': SomalierRelatednessFlag,
+}
 
 FIRST_SEEN = '2026-01-01T00:00:00+00:00'
 RESOLVED_EARLIER = '2026-02-02T00:00:00+00:00'
@@ -71,6 +80,17 @@ def relatedness_flag(**overrides: object) -> dict:
         'ibs0': 900,
         'ibs2': 100,
     } | overrides
+
+
+def as_previously_written(flag: dict) -> dict:
+    """
+    `flag` in the shape a previous run left in Metamist: every dataclass field present, key stamped.
+
+    The factories above deliberately omit fields an older record would not carry, which is a
+    difference reconciliation writes back. Tests about *not* writing need the settled shape.
+    """
+    stamped = flag | {'sequencing_group_key': sequencing_group_key(flag, 'CPG1')}
+    return asdict(FLAG_CLASSES[flag['category']](**stamped))
 
 
 @pytest.fixture
@@ -240,7 +260,9 @@ def test_manually_resolved_flag_stays_resolved_when_the_finding_recurs(written_m
     assert written['manual_resolution_reason'] == 'pedigree known wrong'
     assert written['resolution_date'] == RESOLVED_EARLIER, 'the reviewer resolved it, not this run'
     assert written['date'] == FIRST_SEEN, 'a held issue keeps its first-detected date'
-    assert (written['relatedness'], written['ibs0'], written['ibs2']) == (0.05, 850, 120)
+    assert (written['relatedness'], written['ibs0'], written['ibs2']) == (0.02, 900, 100), (
+        'a curator closed this record, so this run does not rewrite its measurements'
+    )
 
 
 def test_a_changed_finding_is_not_suppressed_by_a_manual_resolution(written_meta):
@@ -276,15 +298,15 @@ def test_a_manually_resolved_flag_stays_held_when_the_finding_disappears(written
 
 
 @pytest.mark.parametrize(
-    ('category', 'flag_factory', 'recurrence_overrides', 'measured_field', 'refreshed_value'),
+    ('category', 'flag_factory', 'recurrence_overrides', 'measured_field', 'stored_value'),
     [
-        ('sex_inference_mismatch', sex_flag, {'mean_depth': 29.0}, 'mean_depth', 29.0),
-        ('self_relatedness_mismatch', self_relatedness_flag, {'relatedness': 0.5}, 'relatedness', 0.5),
-        ('relatedness_mismatch', relatedness_flag, {'relatedness': 0.05}, 'relatedness', 0.05),
+        ('sex_inference_mismatch', sex_flag, {'mean_depth': 29.0}, 'mean_depth', 30.0),
+        ('self_relatedness_mismatch', self_relatedness_flag, {'relatedness': 0.5}, 'relatedness', 0.9),
+        ('relatedness_mismatch', relatedness_flag, {'relatedness': 0.05}, 'relatedness', 0.02),
     ],
 )
 def test_manual_resolution_is_held_for_every_category(
-    written_meta, category, flag_factory, recurrence_overrides, measured_field, refreshed_value
+    written_meta, category, flag_factory, recurrence_overrides, measured_field, stored_value
 ):
     """
     The branch is duplicated across three reconcilers, so all three need their own coverage.
@@ -300,7 +322,7 @@ def test_manual_resolution_is_held_for_every_category(
     written = flags_by_category(written_meta)[category]
     assert written['resolved'] is True
     assert written['manually_resolved'] is True
-    assert written[measured_field] == refreshed_value, 'measured values still refresh while held'
+    assert written[measured_field] == stored_value, 'a closed record is not re-measured'
 
 
 @pytest.mark.parametrize(
@@ -325,3 +347,46 @@ def test_a_recurring_flag_is_retained_for_every_category(written_meta, category,
     assert written['resolution_date'] is None
     assert written['date'] == FIRST_SEEN, 'a recurring issue keeps its first-detected date'
     assert written[field] == expected, "this run's measurement is taken"
+
+
+def test_unchanged_flags_are_not_written_back(written_meta):
+    """
+    Most runs re-measure the same findings and change nothing about the stored record.
+
+    The mutation is audited, so writing a list identical to the stored one is noise in the SG's
+    history. Flag review happens far more often than sample QC, so this is the common case.
+    """
+    stored = as_previously_written(relatedness_flag())
+
+    reconcile(current_flags=[stored], new_flags=[relatedness_flag(date=TODAY)])
+
+    assert written_meta == {}
+
+
+def test_a_changed_measurement_is_still_written(written_meta):
+    """The other half of the escape: a real change must still reach Metamist."""
+    stored = as_previously_written(relatedness_flag())
+
+    reconcile(current_flags=[stored], new_flags=[relatedness_flag(relatedness=0.05)])
+
+    assert flags_by_category(written_meta)['relatedness_mismatch']['relatedness'] == 0.05
+
+
+def test_a_held_flag_whose_finding_recurs_writes_nothing(written_meta):
+    """
+    A curator-closed record is not re-measured, so a recurrence leaves the whole list identical.
+
+    Both halves of the feature meet here: nothing about the flag changes, and so nothing is written.
+    """
+    stored = as_previously_written(curator_resolved(relatedness_flag()))
+
+    reconcile(current_flags=[stored], new_flags=[relatedness_flag(relatedness=0.05)])
+
+    assert written_meta == {}
+
+
+def test_a_flag_missing_its_sequencing_group_key_is_written_back(written_meta):
+    """Stamping the key onto a record written before the field existed is a change worth writing."""
+    reconcile(current_flags=[relatedness_flag()], new_flags=[relatedness_flag()])
+
+    assert flags_by_category(written_meta)['relatedness_mismatch']['sequencing_group_key'] == 'CPG1_CPG2'

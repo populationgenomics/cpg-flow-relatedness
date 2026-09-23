@@ -1,6 +1,7 @@
 import json
 import os
 from argparse import ArgumentParser
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import UTC, datetime
 
@@ -21,16 +22,8 @@ def refresh_measured_values(flag: dict, new_flag: dict, fields: tuple[str, ...])
     """
     Copy this run's measurements onto a flag being kept, leaving identity and resolution alone.
 
-    Mutates in place, matching how the reconcilers below already update these dicts. A field the
-    new flag does not carry is left as it was rather than blanked, which can happen for a flag
-    recorded by an older pipeline version whose new-flag shape has since changed.
+    Mutates in place, matching how the reconcilers below already update these dicts.
     """
-    for field in fields:
-        if field not in new_flag:
-            logger.debug(
-                f"{flag.get('category')} flag missing expected measured field '{field}' on refresh; "
-                'leaving previous value in place.'
-            )
     flag.update({field: new_flag[field] for field in fields if field in new_flag})
 
 
@@ -110,10 +103,9 @@ def reconcile_sg_somalier_sex_inference_flags(
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' remains resolved.")
         elif flag.get('manually_resolved'):
-            # Reviewed and accepted by a curator: the finding is still here, so take this run's
-            # measurements but leave the resolution alone. compare_* requires an unresolved flag,
-            # so without this branch the overwrite below would reopen it on every run.
-            refresh_measured_values(flag, new_somalier_sex_inference_flags_by_key[flag_key], SEX_MEASURED_FIELDS)
+            # Reviewed and accepted by a curator, so the record is closed: left exactly as the
+            # curator left it, measurements included. compare_* requires an unresolved flag, so
+            # without this branch the overwrite below would reopen it on every run.
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['provided']}-{flag['inferred']}' "
                 f'manually resolved by {flag.get("manual_resolution_by")}; held.'
@@ -180,12 +172,7 @@ def reconcile_sg_somalier_self_relatedness_flags(
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' remains resolved.")
         elif flag.get('manually_resolved'):
-            # Reviewed and accepted by a curator: refresh the measurements, keep the resolution.
-            refresh_measured_values(
-                flag,
-                new_somalier_self_relatedness_flags_by_key[flag_key],
-                SELF_RELATEDNESS_MEASURED_FIELDS,
-            )
+            # Closed by a curator: left as-is. See the sex reconciler above.
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['sg_id_1']}-{flag['sg_id_2']}' "
                 f'manually resolved by {flag.get("manual_resolution_by")}; held.'
@@ -254,8 +241,7 @@ def reconcile_sg_somalier_relatedness_flags(
                 # Already resolved and still absent: keep as-is
                 logger.debug(f"{sg_id} :: {report} flag '{flag['category']}' remains resolved.")
         elif flag.get('manually_resolved'):
-            # Reviewed and accepted by a curator: refresh the measurements, keep the resolution.
-            refresh_measured_values(flag, new_somalier_relatedness_flags_by_key[flag_key], RELATEDNESS_MEASURED_FIELDS)
+            # Closed by a curator: left as-is. See the sex reconciler above.
             logger.info(
                 f"{sg_id} :: {report} flag '{flag['category']}' "
                 f'manually resolved by {flag.get("manual_resolution_by")}; held.'
@@ -302,6 +288,9 @@ def reconcile_sg_somalier_flags(
     # Get all the existing relatedness flags of the specified type for this SG
     current_somalier_flags: list[dict] = (sg['meta'] or {}).get(SOMALIER_FLAGS_KEY, [])
     unresolved_current_flags = [flag for flag in current_somalier_flags if not flag.get('resolved', False)]
+    # Reconciliation mutates these dicts in place, so keep a copy of what Metamist holds to compare
+    # the result against at the end.
+    stored_flags = deepcopy(current_somalier_flags)
 
     new_somalier_flags: list[dict] = new_flags_by_sg.get(sg_id, [])
 
@@ -370,8 +359,16 @@ def reconcile_sg_somalier_flags(
     stats = {k: stats[k] + relatedness_stats.get(k, 0) for k in stats}
     final_flags.extend(relatedness_final_flags)
 
+    # Most runs re-measure the same findings and change nothing, and the mutation is audited, so
+    # only write when the list actually differs. Order is stable between runs (per category, stored
+    # flags in their stored order then new ones appended), so a list comparison is enough.
+    reconciled_flags = [asdict(flag) for flag in final_flags]
+    if reconciled_flags == stored_flags:
+        logger.info(f'{sg_id} :: {len(reconciled_flags)} {report} flags unchanged, nothing to write.')
+        return
+
     # Perform the mutation to update the SG meta
-    write_sg_flags(dataset, sg_id, [asdict(flag) for flag in final_flags])
+    write_sg_flags(dataset, sg_id, reconciled_flags)
     logger.info(
         f'{sg_id} :: Recorded {len(final_flags)} {report} flags in Metamist. '
         f'Resolved: {stats["resolved"]}, Retained: {stats["retained"]}, '

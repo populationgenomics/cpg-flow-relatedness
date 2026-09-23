@@ -27,7 +27,7 @@ Three categories of flag are recorded, each keyed by its own attributes:
 - `self_relatedness_mismatch` — two sequencing groups from one participant are not related enough to be the same person
 - `relatedness_mismatch` — the measured relatedness disagrees with the pedigree
 
-Flags persist across runs. A flag that reappears is updated in place, and one that no longer applies is marked resolved with a date rather than deleted, so the report can show a backlog of past findings alongside current ones.
+Flags persist across runs. A flag that reappears is updated in place, and one that no longer applies is marked resolved with a date rather than deleted, so the report can show a backlog of past findings alongside current ones. A run that changes nothing about a sequencing group's flags writes nothing, so the meta history only records real changes.
 
 A flag that is real but accepted, such as a pedigree known to be wrong that will not be corrected, can be resolved by hand:
 
@@ -36,7 +36,7 @@ resolve_somalier_flag --dataset my-dataset --sg-ids CPG001 CPG002 \
     --category relatedness_mismatch --reason "pedigree known wrong" --reviewer ef
 ```
 
-Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report and the Slack summary counts entirely, rather than shown as resolved history. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. Run it locally, against your own Metamist credentials. If more than one flag matches the category and sequencing group IDs it refuses to guess, listing the candidates instead. `--unresolve` reverses a resolution.
+Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report and the Slack summary counts entirely, rather than shown as resolved history. The record is closed at the point the curator resolved it: later runs leave its measurements alone rather than refreshing them. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. Run it locally, against your own Metamist credentials. If more than one flag matches the category and sequencing group IDs it refuses to guess, listing the candidates instead. `--unresolve` reverses a resolution.
 
 ## Relatedness inferences
 
