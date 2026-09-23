@@ -32,6 +32,7 @@ from rd_qc.scripts.somalier_flags_report import (
     _is_same_individual,
     _sg_id_rank,
     collect_somalier_flags,
+    count_manually_resolved,
     flag_sg_key,
     group_by_family,
     referenced_sg_ids,
@@ -62,7 +63,13 @@ def run_pipeline(sequencing_groups=MOCK_SEQUENCING_GROUPS, infos=MOCK_SG_INFOS):
     flagged = [sf for sf in collect_somalier_flags(sequencing_groups) if sf.flags]
     groups = group_by_family(flagged, infos)
     active, resolved = split_active_resolved(groups, infos)
-    summary = summarise_flags(flagged, total_sgs=len(sequencing_groups), families_affected=len(active), infos=infos)
+    summary = summarise_flags(
+        flagged,
+        total_sgs=len(sequencing_groups),
+        families_affected=len(active),
+        infos=infos,
+        manually_resolved=count_manually_resolved(sequencing_groups),
+    )
     return flagged, active, resolved, summary
 
 
@@ -181,12 +188,12 @@ def test_holding_one_flag_takes_nothing_else_with_it():
             assert per_sg.get(sg_id, 0) == count, f'{sg_id} lost a flag it should have kept'
 
 
-def test_manually_resolved_flags_reach_no_section_and_no_count():
+def test_manually_resolved_flags_reach_no_section_and_no_flag_count():
     """
-    Held flags are invisible, not merely de-emphasised.
+    Held flags are absent from the report's findings, and present only as a count of what is held.
 
-    Not a conflict, not a refinement, not resolved history, and not in any summary number, so a
-    reader cannot mistake an accepted finding for a fixed one.
+    Not a conflict, not a refinement, not resolved history, so a reader cannot mistake an accepted
+    finding for a fixed one. The separate count is what stops them vanishing without trace.
     """
     _, _, _, baseline = run_pipeline()
     assert baseline['active_flags'] > 0, 'the baseline fixture must have something to hide'
@@ -207,6 +214,9 @@ def test_manually_resolved_flags_reach_no_section_and_no_count():
     assert summary['active_conflicts'] == 0
     assert summary['active_refinements'] == 0
     assert summary['resolved_flags'] == 0
+    assert summary['manually_resolved_flags'] == sum(len(sg['meta']['somalier_flags']) for sg in held_groups), (
+        'every held flag is counted, even though none of them is shown'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +378,9 @@ def test_summary_counts():
         # which is why it tracks len(active) rather than the conflict count.
         'families_affected': len(active),
         'resolved_flags': 2,
+        # The fixture carries no manual resolutions, so this stays at zero here; the held-count
+        # tests below cover it.
+        'manually_resolved_flags': 0,
     }
 
 
@@ -1118,3 +1131,33 @@ def test_rows_carry_the_sort_keys():
     assert 'data-newest-sg=' in html
     assert 'data-order=' in html
     assert 'Newest samples first' in html
+
+
+def test_the_held_count_is_shown_when_findings_are_held():
+    """The count is the report's only trace of a held finding, so it has to survive rendering."""
+    groups = [{'id': 'CPG001', 'meta': {'somalier_flags': [sex_flag('CPG001', 'M', 'F') | HELD]}}]
+
+    html = render_fixture_html(groups)
+
+    assert '1 finding' in html
+    assert 'manually resolved and not shown' in html
+
+
+def test_no_held_note_when_nothing_is_held():
+    """A dataset nobody has curated should not carry a line about curation."""
+    assert 'manually resolved and not shown' not in render_fixture_html()
+
+
+def test_count_manually_resolved_ignores_flags_the_pipeline_resolved():
+    """Only a curator's resolution is held; an automatic one is ordinary resolved history."""
+    auto_resolved = sex_flag('CPG001', 'M', 'F') | {'resolved': True, 'resolution_date': RESOLVED_ON}
+    groups = [{'id': 'CPG001', 'meta': {'somalier_flags': [auto_resolved]}}]
+
+    assert count_manually_resolved(groups) == 0
+
+
+def test_count_manually_resolved_tolerates_missing_meta():
+    """Same shapes collect_somalier_flags survives: an SG with no meta, and no flags key."""
+    groups = [{'id': 'CPG001', 'meta': None}, {'id': 'CPG002', 'meta': {}}]
+
+    assert count_manually_resolved(groups) == 0

@@ -441,7 +441,6 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
     on one bad meta entry is worse than one that renders the other ninety-nine.
     """
     collected: list[SgFlags] = []
-    held_count = 0
     for sg in sequencing_groups:
         meta = sg.get('meta') or {}
         flags: list[SomalierFlag] = []
@@ -450,9 +449,12 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
             if raw.get('manually_resolved'):
                 # Reviewed and accepted by a curator, so not a finding this report is for. This
                 # is the only way flags enter the report, so one skip covers every section and
-                # every summary count.
-                logger.info(f'{sg["id"]} :: skipping manually resolved Somalier flag')
-                held_count += 1
+                # every active/resolved count. `count_manually_resolved` counts what is skipped
+                # here, for the line the report shows in its place.
+                logger.info(
+                    f'{sg["id"]} :: skipping {raw.get("category")} flag manually resolved by '
+                    f'{raw.get("manual_resolution_by")}'
+                )
                 continue
             category = raw.get('category') or ''
             flag_class = FLAG_CLASSES.get(category)
@@ -464,11 +466,25 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
             except TypeError as exc:
                 logger.warning(f'{sg["id"]} :: skipping malformed {category} flag: {exc}')
         collected.append(SgFlags(sg_id=sg['id'], flags=tuple(flags)))
-    if held_count:
-        # Held flags appear nowhere else in the report, so this is an operator's only sign that
-        # findings were suppressed, short of querying Metamist.
-        logger.info(f'Left {held_count} manually resolved Somalier flag(s) out of the report.')
     return collected
+
+
+def count_manually_resolved(sequencing_groups: list[dict]) -> int:
+    """
+    How many stored flags `collect_somalier_flags` leaves out because a curator resolved them.
+
+    Counted off the raw meta rather than returned from the collection, so that the one function
+    every flag enters the report through keeps its signature and its single job. The report shows
+    this number without the flags themselves: the decision behind each one was made with the
+    curation team, so the report's job is to say that findings are being held, not to relitigate
+    them. The records stay in Metamist, and `resolve_somalier_flag --unresolve` brings one back.
+    """
+    return sum(
+        1
+        for sg in sequencing_groups
+        for entry in (sg.get('meta') or {}).get('somalier_flags') or []
+        if (entry or {}).get('manually_resolved')
+    )
 
 
 def category_key_of(flag: SomalierFlag, default: str = '') -> str:
@@ -918,6 +934,7 @@ def summarise_flags(
     total_sgs: int,
     families_affected: int,
     infos: dict[str, SGInfo],
+    manually_resolved: int = 0,
 ) -> dict:
     """
     Dataset-wide, flag-centric counts for the header cards.
@@ -958,6 +975,10 @@ def summarise_flags(
         'active_same_individual': len(same_individual),
         'families_affected': families_affected,
         'resolved_flags': sum(1 for f in all_flags if f.resolved),
+        # Held flags never reach `sg_flags`, so this count comes in from outside rather than being
+        # derived here. Reported so that a report with findings held does not read the same as one
+        # with none.
+        'manually_resolved_flags': manually_resolved,
     }
 
 
@@ -1164,11 +1185,13 @@ def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: 
         total_sgs=len(sequencing_groups),
         families_affected=len(active_groups),
         infos=infos,
+        manually_resolved=count_manually_resolved(sequencing_groups),
     )
 
     logger.info(
         f'{logging_prefix} :: Rendering {summary["active_flags"]} active flag(s) across '
-        f'{len(active_groups)} famil{"y" if len(active_groups) == 1 else "ies"}'
+        f'{len(active_groups)} famil{"y" if len(active_groups) == 1 else "ies"}, '
+        f'holding {summary["manually_resolved_flags"]} manually resolved'
     )
     started = perf_counter()
     html = render_report(dataset, active_groups, resolved_groups, summary=summary)

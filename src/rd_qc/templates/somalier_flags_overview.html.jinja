@@ -26,6 +26,9 @@
         .card .value.red { color: #d63031; }
         .card .value.grey { color: #636e72; }
         .card .sub { font-size: 0.75rem; color: #636e72; margin-top: 2px; min-height: 1em; }
+        /* Findings a curator closed. A quiet line rather than a card: the count is context for
+           the cards above, not another number needing attention. */
+        .held-note { color: #636e72; font-size: 0.78rem; margin: 0 0 10px 2px; }
 
         /* Static key to the relatedness figures in every table below. Reads as a legend, not
            as data, so it is one quiet strip rather than another row of cards. */
@@ -341,6 +344,11 @@
             <div class="sub">past incidents</div>
         </div>
     </div>
+
+    {% if summary.manually_resolved_flags %}
+    <p class="held-note">{{ summary.manually_resolved_flags }} finding{{ '' if summary.manually_resolved_flags == 1 else 's' }}
+        manually resolved and not shown. Reviewed and accepted with the curation team; the records are kept in Metamist.</p>
+    {% endif %}
 
     {# ------------------------------------------------------------------ #}
     {# Static legend. Figures come from utils.RELATEDNESS_BANDS, which is #}
