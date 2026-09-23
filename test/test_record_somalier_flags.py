@@ -6,9 +6,20 @@ that overwrite — in particular that flag categories absent from the current ru
 rather than silently dropped.
 """
 
+from dataclasses import asdict
+
 import pytest
 
+from rd_qc import flag_store
+from rd_qc.flag_store import sequencing_group_key
 from rd_qc.scripts import record_somalier_flags
+from rd_qc.utils import SomalierRelatednessFlag, SomalierSelfRelatednessFlag, SomalierSexInferenceFlag
+
+FLAG_CLASSES = {
+    'sex_inference_mismatch': SomalierSexInferenceFlag,
+    'self_relatedness_mismatch': SomalierSelfRelatednessFlag,
+    'relatedness_mismatch': SomalierRelatednessFlag,
+}
 
 FIRST_SEEN = '2026-01-01T00:00:00+00:00'
 RESOLVED_EARLIER = '2026-02-02T00:00:00+00:00'
@@ -34,6 +45,24 @@ def sex_flag(**overrides: object) -> dict:
     } | overrides
 
 
+def self_relatedness_flag(**overrides: object) -> dict:
+    """A self_relatedness_mismatch flag as stored in / written to SG meta."""
+    return {
+        'category': 'self_relatedness_mismatch',
+        'date': FIRST_SEEN,
+        'ar_guid': 'guid-old',
+        'resolved': False,
+        'resolution_date': None,
+        'sg_id_1': 'CPG1',
+        'sg_id_2': 'CPG1B',
+        'participant_external_id': 'PART1',
+        'threshold': 0.4,
+        'relatedness': 0.9,
+        'ibs0': 5,
+        'ibs2': 950,
+    } | overrides
+
+
 def relatedness_flag(**overrides: object) -> dict:
     """A relatedness_mismatch flag as stored in / written to SG meta."""
     return {
@@ -53,6 +82,17 @@ def relatedness_flag(**overrides: object) -> dict:
     } | overrides
 
 
+def as_previously_written(flag: dict) -> dict:
+    """
+    `flag` in the shape a previous run left in Metamist: every dataclass field present, key stamped.
+
+    The factories above deliberately omit fields an older record would not carry, which is a
+    difference reconciliation writes back. Tests about *not* writing need the settled shape.
+    """
+    stamped = flag | {'sequencing_group_key': sequencing_group_key(flag, 'CPG1')}
+    return asdict(FLAG_CLASSES[flag['category']](**stamped))
+
+
 @pytest.fixture
 def written_meta(monkeypatch):
     """
@@ -66,7 +106,7 @@ def written_meta(monkeypatch):
         captured.update(variables or {})
         return {}
 
-    monkeypatch.setattr(record_somalier_flags, 'query', fake_query)
+    monkeypatch.setattr(flag_store, 'query', fake_query)
     return captured
 
 
@@ -156,3 +196,197 @@ def test_no_stored_or_new_flags_writes_nothing(written_meta):
     reconcile(current_flags=[], new_flags=[])
 
     assert written_meta == {}
+
+
+def test_manual_resolution_fields_default_to_absent():
+    """A flag nobody has reviewed carries the fields, unset, so every record has the same shape."""
+    flag = SomalierRelatednessFlag(
+        category='relatedness_mismatch',
+        sg_id_1='CPG1',
+        sg_id_2='CPG2',
+        family_external_id='FAM1',
+        expected_relationship='siblings',
+        inferred_relationship='unrelated',
+        relatedness=0.02,
+        ibs0=900,
+        ibs2=100,
+    )
+
+    assert flag.manually_resolved is False
+    assert flag.manual_resolution_reason is None
+    assert flag.manual_resolution_by is None
+
+
+def test_a_flag_stored_before_the_manual_fields_existed_still_deserialises():
+    """The fixture dict has none of the new keys, which is what Metamist holds for older flags."""
+    flag = SomalierRelatednessFlag(**relatedness_flag())
+
+    assert flag.manually_resolved is False
+    assert flag.manual_resolution_reason is None
+    assert flag.manual_resolution_by is None
+
+
+def curator_resolved(flag: dict, **overrides: object) -> dict:
+    """`flag` as the resolve CLI leaves it: resolved, with the reviewer's reason attached."""
+    return (
+        flag
+        | {
+            'resolved': True,
+            'resolution_date': RESOLVED_EARLIER,
+            'manually_resolved': True,
+            'manual_resolution_reason': 'pedigree known wrong',
+            'manual_resolution_by': 'ef',
+        }
+        | overrides
+    )
+
+
+def test_manually_resolved_flag_stays_resolved_when_the_finding_recurs(written_meta):
+    """
+    A run that measures the same finding again must not reopen it.
+
+    Without the manual branch the flag falls through compare_* into the overwrite branch, which
+    sets resolved=False and leaves the manual fields on an active flag.
+    """
+    held = curator_resolved(relatedness_flag())
+    recurrence = relatedness_flag(date=TODAY, relatedness=0.05, ibs0=850, ibs2=120)
+
+    reconcile(current_flags=[held], new_flags=[recurrence])
+
+    written = flags_by_category(written_meta)['relatedness_mismatch']
+    assert written['resolved'] is True
+    assert written['manually_resolved'] is True
+    assert written['manual_resolution_by'] == 'ef'
+    assert written['manual_resolution_reason'] == 'pedigree known wrong'
+    assert written['resolution_date'] == RESOLVED_EARLIER, 'the reviewer resolved it, not this run'
+    assert written['date'] == FIRST_SEEN, 'a held issue keeps its first-detected date'
+    assert (written['relatedness'], written['ibs0'], written['ibs2']) == (0.02, 900, 100), (
+        'a curator closed this record, so this run does not rewrite its measurements'
+    )
+
+
+def test_a_changed_finding_is_not_suppressed_by_a_manual_resolution(written_meta):
+    """
+    Binding is strict: the marker is on one record, so a different measurement surfaces unheld.
+
+    This is the safety property. A pair accepted as parent-child must not stay quiet when the
+    genotypes start saying unrelated.
+    """
+    held = curator_resolved(relatedness_flag())
+    reinferred = relatedness_flag(inferred_relationship='parent-child')
+
+    reconcile(current_flags=[held], new_flags=[reinferred])
+
+    written = written_meta['sgMeta']['somalier_flags']
+    assert len(written) == 2
+
+    by_inferred = {flag['inferred_relationship']: flag for flag in written}
+    assert by_inferred['unrelated']['manually_resolved'] is True
+    assert by_inferred['parent-child']['resolved'] is False
+    assert by_inferred['parent-child']['manually_resolved'] is False
+
+
+def test_a_manually_resolved_flag_stays_held_when_the_finding_disappears(written_meta):
+    """An accepted finding that later goes away keeps its marker and stays out of the report."""
+    held = curator_resolved(relatedness_flag())
+
+    reconcile(current_flags=[held], new_flags=[sex_flag()])
+
+    written = flags_by_category(written_meta)['relatedness_mismatch']
+    assert written['manually_resolved'] is True
+    assert written['resolution_date'] == RESOLVED_EARLIER, 'the resolution date is not re-stamped'
+
+
+@pytest.mark.parametrize(
+    ('category', 'flag_factory', 'recurrence_overrides', 'measured_field', 'stored_value'),
+    [
+        ('sex_inference_mismatch', sex_flag, {'mean_depth': 29.0}, 'mean_depth', 30.0),
+        ('self_relatedness_mismatch', self_relatedness_flag, {'relatedness': 0.5}, 'relatedness', 0.9),
+        ('relatedness_mismatch', relatedness_flag, {'relatedness': 0.05}, 'relatedness', 0.02),
+    ],
+)
+def test_manual_resolution_is_held_for_every_category(
+    written_meta, category, flag_factory, recurrence_overrides, measured_field, stored_value
+):
+    """
+    The branch is duplicated across three reconcilers, so all three need their own coverage.
+
+    Each case recurs the SAME identity with only a measured field changed, so this exercises the
+    held branch specifically rather than the added-new-flag path (which a changed identity would
+    trigger instead, passing for the wrong reason).
+    """
+    held = curator_resolved(flag_factory())
+
+    reconcile(current_flags=[held], new_flags=[flag_factory(**recurrence_overrides)])
+
+    written = flags_by_category(written_meta)[category]
+    assert written['resolved'] is True
+    assert written['manually_resolved'] is True
+    assert written[measured_field] == stored_value, 'a closed record is not re-measured'
+
+
+@pytest.mark.parametrize(
+    ('category', 'factory', 'refreshed', 'field', 'expected'),
+    [
+        ('sex_inference_mismatch', sex_flag, {'mean_depth': 29.0}, 'mean_depth', 29.0),
+        ('self_relatedness_mismatch', self_relatedness_flag, {'relatedness': 0.5}, 'relatedness', 0.5),
+        ('relatedness_mismatch', relatedness_flag, {'relatedness': 0.05}, 'relatedness', 0.05),
+    ],
+)
+def test_a_recurring_flag_is_retained_for_every_category(written_meta, category, factory, refreshed, field, expected):
+    """
+    The retained branch, pinned per category.
+
+    All three reconcilers route this branch through one `refresh_measured_values` call with their
+    own field tuple, so passing the wrong tuple would silently stop refreshing measurements.
+    """
+    reconcile(current_flags=[factory()], new_flags=[factory(date=TODAY, **refreshed)])
+
+    written = flags_by_category(written_meta)[category]
+    assert written['resolved'] is False
+    assert written['resolution_date'] is None
+    assert written['date'] == FIRST_SEEN, 'a recurring issue keeps its first-detected date'
+    assert written[field] == expected, "this run's measurement is taken"
+
+
+def test_unchanged_flags_are_not_written_back(written_meta):
+    """
+    Most runs re-measure the same findings and change nothing about the stored record.
+
+    The mutation is audited, so writing a list identical to the stored one is noise in the SG's
+    history. Flag review happens far more often than sample QC, so this is the common case.
+    """
+    stored = as_previously_written(relatedness_flag())
+
+    reconcile(current_flags=[stored], new_flags=[relatedness_flag(date=TODAY)])
+
+    assert written_meta == {}
+
+
+def test_a_changed_measurement_is_still_written(written_meta):
+    """The other half of the escape: a real change must still reach Metamist."""
+    stored = as_previously_written(relatedness_flag())
+
+    reconcile(current_flags=[stored], new_flags=[relatedness_flag(relatedness=0.05)])
+
+    assert flags_by_category(written_meta)['relatedness_mismatch']['relatedness'] == 0.05
+
+
+def test_a_held_flag_whose_finding_recurs_writes_nothing(written_meta):
+    """
+    A curator-closed record is not re-measured, so a recurrence leaves the whole list identical.
+
+    Both halves of the feature meet here: nothing about the flag changes, and so nothing is written.
+    """
+    stored = as_previously_written(curator_resolved(relatedness_flag()))
+
+    reconcile(current_flags=[stored], new_flags=[relatedness_flag(relatedness=0.05)])
+
+    assert written_meta == {}
+
+
+def test_a_flag_missing_its_sequencing_group_key_is_written_back(written_meta):
+    """Stamping the key onto a record written before the field existed is a change worth writing."""
+    reconcile(current_flags=[relatedness_flag()], new_flags=[relatedness_flag()])
+
+    assert flags_by_category(written_meta)['relatedness_mismatch']['sequencing_group_key'] == 'CPG1_CPG2'

@@ -1,6 +1,6 @@
 # CPG-Flow - Rare Disease QC
 
-Version 0.2.4
+Version 0.3.0
 
 A CPG workflow for sample identity and relatedness QC using [Somalier](https://github.com/brentp/somalier), built on the [cpg-flow](https://github.com/populationgenomics/cpg-flow) pipeline framework.
 
@@ -27,7 +27,16 @@ Three categories of flag are recorded, each keyed by its own attributes:
 - `self_relatedness_mismatch` — two sequencing groups from one participant are not related enough to be the same person
 - `relatedness_mismatch` — the measured relatedness disagrees with the pedigree
 
-Flags persist across runs. A flag that reappears is updated in place, and one that no longer applies is marked resolved with a date rather than deleted, so the report can show a backlog of past findings alongside current ones.
+Flags persist across runs. A flag that reappears is updated in place, and one that no longer applies is marked resolved with a date rather than deleted, so the report can show a backlog of past findings alongside current ones. A run that changes nothing about a sequencing group's flags writes nothing, so the meta history only records real changes.
+
+A flag that is real but accepted, such as a pedigree known to be wrong that will not be corrected, can be resolved by hand:
+
+```bash
+resolve_somalier_flag --dataset my-dataset --sg-ids CPG001 CPG002 \
+    --category relatedness_mismatch --reason "pedigree known wrong" --reviewer ef
+```
+
+Take the sequencing group IDs off the report row in either order. A manually resolved flag stays resolved even while the checks keep measuring the finding, and it is left out of the report and the Slack summary counts entirely, rather than shown as resolved history. The report says how many findings are being held without listing them. The record is closed at the point the curator resolved it: later runs leave its measurements alone rather than refreshing them. The resolution is bound to that exact finding, so if the genotypes later say something different about the same pair, the new finding is reported as usual. Run it locally, against your own Metamist credentials. If more than one flag matches the category and sequencing group IDs it refuses to guess, listing the candidates instead. `--unresolve` reverses a resolution.
 
 ## Relatedness inferences
 
@@ -49,6 +58,7 @@ src
 └── rd_qc
     ├── run_workflow.py
     ├── config_template.toml
+    ├── flag_store.py
     ├── stages.py
     ├── utils.py
     ├── jobs
@@ -59,6 +69,7 @@ src
     │   ├── check_pedigree.py
     │   ├── check_self_relatedness.py
     │   ├── record_somalier_flags.py
+    │   ├── resolve_somalier_flag.py
     │   └── somalier_flags_report.py
     └── templates
         └── somalier_flags_overview.html.jinja
@@ -76,6 +87,8 @@ src
 - `GenerateSomalierFlagsReport` — renders every flag recorded in Metamist into the HTML report
 
 `utils.py` contains the flag dataclasses, the relatedness inference and verdict logic, and utility functions for querying Metamist and building PED files.
+
+`flag_store.py` is the only module that writes the `somalier_flags` list on a sequencing group's meta. The mutation replaces the whole list rather than patching entries, so a second copy of that write is a second chance to drop every flag on a sequencing group, and both the pipeline's reconciler and `resolve_somalier_flag` go through this one. Reading is less dangerous, and the reconciler and the report still read the meta key directly.
 
 `jobs/` contains the Hail Batch job builders. `scripts/` contains the post-processing scripts those jobs run.
 

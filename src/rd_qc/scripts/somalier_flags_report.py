@@ -444,8 +444,19 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
     for sg in sequencing_groups:
         meta = sg.get('meta') or {}
         flags: list[SomalierFlag] = []
-        for raw in meta.get('somalier_flags') or []:
-            category = (raw or {}).get('category') or ''
+        for entry in meta.get('somalier_flags') or []:
+            raw = entry or {}
+            if raw.get('manually_resolved'):
+                # Reviewed and accepted by a curator, so not a finding this report is for. This
+                # is the only way flags enter the report, so one skip covers every section and
+                # every active/resolved count. `count_manually_resolved` counts what is skipped
+                # here, for the line the report shows in its place.
+                logger.info(
+                    f'{sg["id"]} :: skipping {raw.get("category")} flag manually resolved by '
+                    f'{raw.get("manual_resolution_by")}'
+                )
+                continue
+            category = raw.get('category') or ''
             flag_class = FLAG_CLASSES.get(category)
             if flag_class is None:
                 logger.warning(f'{sg["id"]} :: skipping Somalier flag with unrecognised category {category!r}')
@@ -456,6 +467,24 @@ def collect_somalier_flags(sequencing_groups: list[dict]) -> list[SgFlags]:
                 logger.warning(f'{sg["id"]} :: skipping malformed {category} flag: {exc}')
         collected.append(SgFlags(sg_id=sg['id'], flags=tuple(flags)))
     return collected
+
+
+def count_manually_resolved(sequencing_groups: list[dict]) -> int:
+    """
+    How many stored flags `collect_somalier_flags` leaves out because a curator resolved them.
+
+    Counted off the raw meta rather than returned from the collection, so that the one function
+    every flag enters the report through keeps its signature and its single job. The report shows
+    this number without the flags themselves: the decision behind each one was made with the
+    curation team, so the report's job is to say that findings are being held, not to relitigate
+    them. The records stay in Metamist, and `resolve_somalier_flag --unresolve` brings one back.
+    """
+    return sum(
+        1
+        for sg in sequencing_groups
+        for entry in (sg.get('meta') or {}).get('somalier_flags') or []
+        if (entry or {}).get('manually_resolved')
+    )
 
 
 def category_key_of(flag: SomalierFlag, default: str = '') -> str:
@@ -905,6 +934,7 @@ def summarise_flags(
     total_sgs: int,
     families_affected: int,
     infos: dict[str, SGInfo],
+    manually_resolved: int = 0,
 ) -> dict:
     """
     Dataset-wide, flag-centric counts for the header cards.
@@ -945,6 +975,10 @@ def summarise_flags(
         'active_same_individual': len(same_individual),
         'families_affected': families_affected,
         'resolved_flags': sum(1 for f in all_flags if f.resolved),
+        # Held flags never reach `sg_flags`, so this count comes in from outside rather than being
+        # derived here. Reported so that a report with findings held does not read the same as one
+        # with none.
+        'manually_resolved_flags': manually_resolved,
     }
 
 
@@ -1036,7 +1070,7 @@ def _change_lines(summary: dict, previous_summary: dict, on_date: str) -> list[s
     deltas = {key: summary[key] - previous_summary.get(key, 0) for key in ('total_sgs', 'families_affected')}
     deltas |= {
         key: summary[key] - previous_summary.get(key, 0)
-        for key in ('active_conflicts', 'active_refinements', 'resolved_flags')
+        for key in ('active_conflicts', 'active_refinements', 'resolved_flags', 'manually_resolved_flags')
     }
 
     changes = []
@@ -1054,6 +1088,10 @@ def _change_lines(summary: dict, previous_summary: dict, on_date: str) -> list[s
         changes.append(f' - +{_plural(deltas["active_refinements"], "new pedigree refinement")}')
     if deltas['resolved_flags'] > 0:
         changes.append(f' - {_plural(deltas["resolved_flags"], "more flag")} resolved')
+    if deltas['manually_resolved_flags'] > 0:
+        # A held conflict leaves the conflict count without touching `resolved_flags`, so before
+        # this line a hold read as ' - 1 fewer conflict' on its own, which is how a fix reads.
+        changes.append(f' - {_plural(deltas["manually_resolved_flags"], "more finding")} manually resolved')
 
     if not changes:
         return [f'No change since the last report on {on_date}']
@@ -1151,11 +1189,13 @@ def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: 
         total_sgs=len(sequencing_groups),
         families_affected=len(active_groups),
         infos=infos,
+        manually_resolved=count_manually_resolved(sequencing_groups),
     )
 
     logger.info(
         f'{logging_prefix} :: Rendering {summary["active_flags"]} active flag(s) across '
-        f'{len(active_groups)} famil{"y" if len(active_groups) == 1 else "ies"}'
+        f'{len(active_groups)} famil{"y" if len(active_groups) == 1 else "ies"}, '
+        f'holding {summary["manually_resolved_flags"]} manually resolved'
     )
     started = perf_counter()
     html = render_report(dataset, active_groups, resolved_groups, summary=summary)

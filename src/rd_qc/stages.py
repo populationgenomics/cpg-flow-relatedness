@@ -189,8 +189,9 @@ class SomalierPedigreeCheck(stage.DatasetStage):
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
         outputs = self.expected_outputs(dataset)
 
+        dataset_name = config.dataset_for_access_level(dataset.name)
         # filter_sgs=True ensures that only SGs meeting the sequencing type & technology requirements are included
-        index = get_project_sgs_and_fingerprints(dataset.name, filter_sgs=True)
+        index = get_project_sgs_and_fingerprints(dataset_name, filter_sgs=True)
         somalier_paths = {sg_id: info.somalier_path for sg_id, info in index.by_sg.items()}
 
         try:
@@ -201,7 +202,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             somalier_self_relatedness_json_paths = []
 
         # Build PED file content and write to GCS at orchestration time
-        ped_content = build_ped_content(dataset.name, index)
+        ped_content = build_ped_content(dataset_name, index)
         with outputs['expected_ped'].open('w') as f:
             f.write(ped_content)
 
@@ -210,8 +211,8 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             somalier_self_relatedness_json_paths=somalier_self_relatedness_json_paths,
             outputs=outputs,
             tmp_prefix=dataset.tmp_prefix() / 'somalier_checks' / 'pedigree',
-            dataset_name=dataset.name,
-            label=f'{dataset.name} Somalier',
+            dataset_name=dataset_name,
+            label=f'{dataset_name} Somalier',
             job_attrs={},
         )
 
