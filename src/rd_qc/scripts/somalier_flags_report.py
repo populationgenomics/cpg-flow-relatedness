@@ -1070,7 +1070,7 @@ def _change_lines(summary: dict, previous_summary: dict, on_date: str) -> list[s
     deltas = {key: summary[key] - previous_summary.get(key, 0) for key in ('total_sgs', 'families_affected')}
     deltas |= {
         key: summary[key] - previous_summary.get(key, 0)
-        for key in ('active_conflicts', 'active_refinements', 'resolved_flags')
+        for key in ('active_conflicts', 'active_refinements', 'resolved_flags', 'manually_resolved_flags')
     }
 
     changes = []
@@ -1088,6 +1088,10 @@ def _change_lines(summary: dict, previous_summary: dict, on_date: str) -> list[s
         changes.append(f' - +{_plural(deltas["active_refinements"], "new pedigree refinement")}')
     if deltas['resolved_flags'] > 0:
         changes.append(f' - {_plural(deltas["resolved_flags"], "more flag")} resolved')
+    if deltas['manually_resolved_flags'] > 0:
+        # A held conflict leaves the conflict count without touching `resolved_flags`, so before
+        # this line a hold read as ' - 1 fewer conflict' on its own, which is how a fix reads.
+        changes.append(f' - {_plural(deltas["manually_resolved_flags"], "more finding")} manually resolved')
 
     if not changes:
         return [f'No change since the last report on {on_date}']

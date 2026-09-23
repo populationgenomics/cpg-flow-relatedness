@@ -681,6 +681,41 @@ def test_message_reports_flags_that_have_been_fixed():
     assert f'{summary["resolved_flags"]} more flags resolved' in text
 
 
+def test_message_says_when_a_conflict_left_because_a_curator_held_it():
+    """
+    A hold drops the conflict count without raising `resolved_flags`, which reads as a fix.
+
+    Before this line the message said ' - 1 fewer conflict' with nothing beside it, and a reader
+    could take that as the conflict having been sorted out rather than accepted as-is.
+    """
+    _, _, _, summary = run_pipeline()
+    summary = {**summary, 'active_conflicts': summary['active_conflicts'] - 1, 'manually_resolved_flags': 1}
+    previous = previous_report(
+        {**summary, 'active_conflicts': summary['active_conflicts'] + 1, 'manually_resolved_flags': 0}
+    )
+
+    text = message_for(summary, previous)
+
+    assert '1 fewer conflict' in text
+    assert '1 more finding manually resolved' in text
+
+
+def test_a_previous_summary_from_before_the_held_count_reads_as_none_held():
+    """
+    The first report after this ships compares against one with no such key.
+
+    It reads as 0, so an existing hold is announced once as if it were new. That matches every
+    other key here: overstating the change once beats hiding it.
+    """
+    _, _, _, summary = run_pipeline()
+    summary = {**summary, 'manually_resolved_flags': 2}
+    previous = previous_report({key: value for key, value in summary.items() if key != 'manually_resolved_flags'})
+
+    text = message_for(summary, previous)
+
+    assert '2 more findings manually resolved' in text
+
+
 def test_message_survives_a_previous_summary_from_before_the_conflict_split():
     _, _, _, summary = run_pipeline()
     # Reports registered before conflicts/refinements existed only carry these keys.
