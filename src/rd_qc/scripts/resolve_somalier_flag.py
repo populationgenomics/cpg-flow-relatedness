@@ -29,9 +29,6 @@ EXIT_REFUSED = 1
 # Deliberately matches argparse's own exit code for a bad invocation: both mean the same thing to a caller.
 EXIT_BAD_ARGS = 2
 
-# Named once so the parser and the refusal message that points a curator at it cannot drift apart.
-UNRESOLVE_ARG = '--unresolve'
-
 # The fields that tell two flags of the same category apart, for `describe`.
 CATEGORY_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
     'sex_inference_mismatch': ('provided', 'inferred'),
@@ -137,7 +134,7 @@ def select_target(
             return None, (
                 f'{category} for {sg_key} is already manually resolved, on '
                 f'{flag.get("resolution_date")} by {flag.get("manual_resolution_by")}: '
-                f'{flag.get("manual_resolution_reason")}. Use {UNRESOLVE_ARG} to reopen it.'
+                f'{flag.get("manual_resolution_reason")}. Use --unresolve to reopen it.'
             )
         if not candidates:
             return None, f'No unresolved {category} flag for {sg_key}. Stored flags:\n{describe(stored, sg_key)}'
@@ -268,7 +265,7 @@ def cli_main() -> int:
     parser.add_argument('--reason', required=True, help='Why this finding is accepted as-is')
     parser.add_argument('--reviewer', required=True, help='Who decided')
     parser.add_argument(
-        UNRESOLVE_ARG,
+        '--unresolve',
         action='store_true',
         help='Reopen a manually resolved flag instead, so it returns to the report',
     )
