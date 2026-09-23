@@ -1,6 +1,6 @@
 # CPG-Flow - Rare Disease QC
 
-Version 0.3.0
+Version 0.3.1
 
 A CPG workflow for sample identity and relatedness QC using [Somalier](https://github.com/brentp/somalier), built on the [cpg-flow](https://github.com/populationgenomics/cpg-flow) pipeline framework.
 
