@@ -192,7 +192,9 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         dataset_name = config.dataset_for_access_level(dataset.name)
         # filter_sgs=True ensures that only SGs meeting the sequencing type & technology requirements are included
         index = get_project_sgs_and_fingerprints(dataset_name, filter_sgs=True)
-        somalier_paths = {sg_id: info.somalier_path for sg_id, info in index.by_sg.items()}
+        somalier_paths = {
+            sg_id: info.somalier_path for sg_id, info in index.by_sg.items() if info.somalier_path is not None
+        }
 
         try:
             somalier_self_relatedness_json_paths = [
