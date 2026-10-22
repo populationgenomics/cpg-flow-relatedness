@@ -433,6 +433,11 @@ def _query_project_sgs(project: str) -> list[dict]:
     return response['project']['sequencingGroups']
 
 
+def get_project_sequencing_levels(project: str) -> set[tuple[str, str]]:
+    """The distinct (sequencing type, sequencing technology) pairs among the project's SGs."""
+    return {(sg['type'], sg['technology']) for sg in _query_project_sgs(project)}
+
+
 def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> SomalierIndex:
     """
     Query metamist for all SGs in the project with their somalier fingerprint status.
