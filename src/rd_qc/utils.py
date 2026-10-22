@@ -9,6 +9,7 @@ from functools import cache
 from google.cloud import storage as gcs
 from loguru import logger
 
+from cpg_flow import targets
 from cpg_flow.metamist import get_metamist
 from cpg_utils import Path
 from cpg_utils.config import config_retrieve, try_get_ar_guid
@@ -408,6 +409,20 @@ def convert_to_web_url(dataset_name: str, html_path: Path | str) -> str:
         config_retrieve(['storage', dataset_name, 'web']),
         config_retrieve(['storage', dataset_name, 'web_url']),
     )
+
+
+def pedigree_base_html_path(dataset: targets.Dataset, seq_type: str, seq_tech: str) -> Path:
+    """
+    The static pedigree check page for one sequencing type and technology, overwritten by each run.
+
+    Pedigree checks are scoped by type and technology, so each pair gets its own page.
+    """
+    return dataset.web_prefix() / 'somalier_checks' / 'pedigree' / seq_type / seq_tech / f'{dataset.name}.html'
+
+
+def flags_report_base_html_path(dataset: targets.Dataset, seq_type: str, seq_tech: str) -> Path:
+    """The static Somalier flags report for one sequencing type and technology, overwritten by each run."""
+    return dataset.web_prefix() / 'somalier_flags' / seq_type / seq_tech / 'somalier_flags_report.html'
 
 
 @cache
