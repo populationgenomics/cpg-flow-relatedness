@@ -107,21 +107,29 @@ def lrs_multiqc(
     out_html_url: str,
     label: str,
     job_attrs: dict,
+    current_paths: dict[str, list[str]] | None = None,
 ) -> list[Job]:
     """
     Run MultiQC, then check thresholds, then record flags in Metamist.
 
     All three jobs are returned, so a stage depending on this one waits for the flags to be written.
     `label` sets the SG meta key the flags go into: 'CRAM' -> 'cram_qc_flags'.
+
+    `current_paths` are this run's QC outputs, {SG ID: [paths]}. Metamist is queried while the workflow is built,
+    before this batch has registered them, so without these an SG's first QC run would be left out.
     """
     batch_instance = hail_batch.get_batch()
     tmp_prefix = dataset.tmp_prefix() / 'multiqc' / 'long_read'
     dataset_name = config.dataset_for_access_level(dataset.name)
-    sequencing_group_id_map = dataset.rich_id_map()
+    # Every SG in the run, not just those with an external ID, so the record job reconciles all of them
+    sequencing_group_id_map = {sg.id: sg.rich_id for sg in dataset.get_sequencing_groups()}
 
     sg_paths = _get_registered_qc_paths(dataset_name)
     _add_companion_paths(sg_paths)
-    logger.info(f'Long-read MultiQC for {dataset.name}: {len(sg_paths)} SGs with registered QC outputs')
+    for sg_id, paths in (current_paths or {}).items():
+        sg_paths.setdefault(sg_id, [])
+        sg_paths[sg_id].extend(p for p in paths if p not in sg_paths[sg_id])
+    logger.info(f'Long-read MultiQC for {dataset.name}: {len(sg_paths)} SGs with QC outputs')
 
     all_paths = {p for sg_files in sg_paths.values() for p in sg_files}
     if not all_paths:
