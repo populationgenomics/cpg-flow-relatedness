@@ -5,6 +5,7 @@ suggested location for any utility methods or constants used across multiple sta
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cache
+from typing import Any
 
 from google.cloud import storage as gcs
 from loguru import logger
@@ -197,6 +198,60 @@ class SomalierRelatednessFlag(SomalierFlag):
     # 'conflict' or 'refinement', from relatedness_verdict. Stored so the report can classify a
     # flag without the pedigree. Empty on older records; readers treat those as conflicts.
     verdict: str = ''
+
+
+@dataclass(frozen=True)
+class QcFlag:
+    """
+    A CRAM QC metric outside its threshold, stored in SG meta under `cram_qc_flags`.
+
+    Same shape as align-genotype's and rdrnaseq's QcFlag, so short- and long-read CRAM QC flags read alike.
+    """
+
+    flag: str
+    value: float
+    comparison: str
+    threshold: float
+    section: str
+    date: str
+    ar_guid: str
+    # 'fail' = do not analyse without a decision; 'warn' = a human should look.
+    severity: str = 'fail'
+    resolved: bool = False
+    resolution_date: str | None = None
+
+
+# Threshold direction -> (comparison sign recorded on the flag, predicate for "breaches this threshold")
+QC_DIRECTIONS: dict[str, tuple[str, Any]] = {
+    'under': ('<', lambda val, thresh: val < thresh),
+    'over': ('>', lambda val, thresh: val > thresh),
+}
+# Severity tiers, worst first, so a value breaching both is recorded once, as a fail.
+QC_SEVERITIES: tuple[str, ...] = ('fail', 'warn')
+
+
+def load_qc_thresholds(key: str) -> dict[str, dict[str, dict[str, float]]]:
+    """
+    Read [qc_thresholds.<key>.<severity>.<direction>] into {direction: {metric: {severity: threshold}}}.
+
+    For long-read CRAM QC the key is the SG's platform, e.g. 'pacbio'.
+    """
+    thresholds: dict[str, dict[str, dict[str, float]]] = {direction: {} for direction in QC_DIRECTIONS}
+    for severity in QC_SEVERITIES:
+        for direction in QC_DIRECTIONS:
+            configured = config_retrieve(['qc_thresholds', key, severity, direction], {})
+            for metric, threshold in configured.items():
+                thresholds[direction].setdefault(metric, {})[severity] = threshold
+    return thresholds
+
+
+def worst_qc_breach(val: float, tiers: dict[str, float], direction: str) -> tuple[str, float] | None:
+    """Return (severity, threshold) of the most severe tier `val` breaches, else None."""
+    _, breaches = QC_DIRECTIONS[direction]
+    for severity in QC_SEVERITIES:
+        if severity in tiers and breaches(val, tiers[severity]):
+            return severity, tiers[severity]
+    return None
 
 
 # peddy's Ped.relation() vocabulary. Pinned here because the pedigree check compares these exact
