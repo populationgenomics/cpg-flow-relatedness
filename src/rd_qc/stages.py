@@ -2,7 +2,14 @@
 
 from datetime import datetime
 
-from rd_qc.jobs import generate_somalier, relate, somalier_flags_report
+from rd_qc.jobs import (
+    generate_somalier,
+    lrs_multiqc,
+    lrs_samtools_stats,
+    lrs_verifybamid,
+    relate,
+    somalier_flags_report,
+)
 from rd_qc.utils import (
     build_ped_content,
     convert_to_web_url,
@@ -144,6 +151,113 @@ class SomalierSelfCheck(stage.DatasetStage):
             all_jobs.extend(jobs)
 
         return self.make_outputs(dataset, data=outputs, jobs=all_jobs)
+
+
+@stage.stage(analysis_type='qc', analysis_keys=['stats'])
+class LongReadQcSamtoolsStats(stage.SequencingGroupStage):
+    """
+    samtools stats on a representative sample of a long-read CRAM, for error_rate, plus whole-CRAM idxstats for
+    reads_mapped_percent. Long-read runs only.
+
+    The registered `qc` analysis carries meta.stage, which LongReadMultiQC queries on.
+    """
+
+    def expected_outputs(self, sequencing_group: targets.SequencingGroup) -> dict[str, Path]:
+        prefix = sequencing_group.dataset.prefix() / 'qc' / 'long_read' / 'samtools_stats' / sequencing_group.id
+        return {
+            'stats': to_path(f'{prefix}.samtools-stats'),
+            'idxstats': to_path(f'{prefix}.idxstats'),
+            'mapped_mqc': to_path(f'{prefix}.lrs_mapped_mqc.tsv'),
+        }
+
+    def queue_jobs(self, sequencing_group: targets.SequencingGroup, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
+        outputs = self.expected_outputs(sequencing_group)
+        if sequencing_group.cram is None:
+            return self.make_outputs(sequencing_group, error_msg=f'{sequencing_group.id}: no CRAM in Metamist')
+
+        job = lrs_samtools_stats.samtools_stats_job(
+            sg_id=sequencing_group.id,
+            cram=sequencing_group.cram,
+            outputs=outputs,
+            job_attrs=self.get_job_attrs(sequencing_group),
+        )
+        return self.make_outputs(sequencing_group, data=outputs, jobs=[job], meta={'stage': self.name})
+
+
+@stage.stage(analysis_type='qc')
+class LongReadQcVerifyBamId(stage.SequencingGroupStage):
+    """
+    VerifyBamID2 on a long-read CRAM, for FREEMIX. Long-read runs only.
+
+    The registered `qc` analysis carries meta.stage, which LongReadMultiQC queries on.
+    """
+
+    def expected_outputs(self, sequencing_group: targets.SequencingGroup) -> Path:
+        return (
+            sequencing_group.dataset.prefix()
+            / 'qc'
+            / 'long_read'
+            / 'verifybamid'
+            / f'{sequencing_group.id}.verify-bamid.selfSM'
+        )
+
+    def queue_jobs(self, sequencing_group: targets.SequencingGroup, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
+        output = self.expected_outputs(sequencing_group)
+        if sequencing_group.cram is None:
+            return self.make_outputs(sequencing_group, error_msg=f'{sequencing_group.id}: no CRAM in Metamist')
+
+        job = lrs_verifybamid.verifybamid_job(
+            sg_id=sequencing_group.id,
+            cram=sequencing_group.cram,
+            output=output,
+            job_attrs=self.get_job_attrs(sequencing_group),
+        )
+        return self.make_outputs(sequencing_group, data=output, jobs=[job], meta={'stage': self.name})
+
+
+@stage.stage(
+    required_stages=[LongReadQcSamtoolsStats, LongReadQcVerifyBamId],
+    analysis_type='qc',
+    analysis_keys=['json', 'html'],
+)
+class LongReadMultiQC(stage.DatasetStage):
+    """
+    MultiQC over the dataset's long-read CRAM QC: this run's samtools stats and VerifyBamID outputs, plus earlier
+    runs' and the ingested mosdepth outputs from Metamist. Checks them against the per-platform thresholds and
+    records flags in SG meta under `cram_qc_flags`. Long-read runs only.
+    """
+
+    def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
+        sg_hash = dataset.get_alignment_inputs_hash()
+        return {
+            'latest': dataset.web_prefix() / 'qc' / 'long_read' / 'latest' / 'multiqc.html',
+            'html': dataset.web_prefix() / 'qc' / 'long_read' / sg_hash / 'multiqc.html',
+            'json': dataset.prefix() / 'qc' / 'long_read' / sg_hash / 'multiqc_data.json',
+            'checks': dataset.prefix() / 'qc' / 'long_read' / sg_hash / 'qc-checks.json',
+        }
+
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+        outputs = self.expected_outputs(dataset)
+
+        # This run's outputs, which Metamist won't have registered yet when lrs_multiqc queries it
+        current_paths: dict[str, list[str]] = {}
+        for sg in dataset.get_sequencing_groups():
+            stats = inputs.as_dict(sg, LongReadQcSamtoolsStats)
+            current_paths[sg.id] = [
+                str(stats['stats']),
+                str(stats['mapped_mqc']),
+                str(inputs.as_path(sg, LongReadQcVerifyBamId)),
+            ]
+
+        jobs = lrs_multiqc.lrs_multiqc(
+            dataset=dataset,
+            outputs=outputs,
+            out_html_url=convert_to_web_url(dataset.name, outputs['html']),
+            label='CRAM',
+            job_attrs=self.get_job_attrs(dataset),
+            current_paths=current_paths,
+        )
+        return self.make_outputs(dataset, data=outputs, jobs=jobs)
 
 
 @stage.stage(required_stages=[GenerateMissingSomalierFingerprints, SomalierSelfCheck])
