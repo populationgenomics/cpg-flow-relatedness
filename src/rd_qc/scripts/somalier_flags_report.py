@@ -1001,9 +1001,12 @@ def render_report(
     resolved_groups: list[FamilyGroup],
     summary: dict,
     generated_at: str | None = None,
+    links: list[dict] | None = None,
 ) -> str:
     """
     Render the Somalier flags report HTML using the Jinja template.
+
+    `links` are the per-sequencing-level report and pedigree check links from `level_links`.
 
     Takes the active groups whole and splits them into conflicts and refinements here, so callers
     only ever deal with the active/resolved distinction that matches the flag lifecycle.
@@ -1029,6 +1032,7 @@ def render_report(
         same_individual_groups=same_individual_groups,
         resolved_groups=resolved_groups,
         summary=summary,
+        level_links=links or [],
         relatedness_bands=RELATEDNESS_BANDS,
         category_chips=chips,
         inline_flag_limit=INLINE_FLAG_LIMIT,
@@ -1098,21 +1102,47 @@ def _change_lines(summary: dict, previous_summary: dict, on_date: str) -> list[s
     return [f'📢 *Changes since the last report on {on_date}*', *changes]
 
 
+def level_links(flags_report_urls: dict[str, str], pedigree_urls: dict[str, str], current_level: str) -> list[dict]:
+    """
+    One entry per sequencing level ('type/technology') with links to its latest flags report and pedigree check.
+
+    Reports and pedigree checks are scoped by sequencing type and technology, so each level has its own pages.
+    """
+    return [
+        {
+            'label': level.replace('/', ', '),
+            'is_current': level == current_level,
+            'flags_url': flags_report_urls.get(level),
+            'pedigree_url': pedigree_urls.get(level),
+        }
+        for level in sorted(set(flags_report_urls) | set(pedigree_urls))
+    ]
+
+
+def _level_link_line(link: dict) -> str:
+    """A Slack line linking one sequencing level's latest flags report and pedigree check."""
+    parts = []
+    if link['flags_url']:
+        parts.append(f'<{link["flags_url"]}|Flags report>')
+    if link['pedigree_url']:
+        parts.append(f'<{link["pedigree_url"]}|Pedigree check>')
+    return f'🔬 {link["label"]}: ' + ' · '.join(parts)
+
+
 def summary_message_text(
     dataset: str,
     *,
     flags_html_url: str,
-    somalier_html_url: str,
+    links: list[dict],
     seq_type: str,
     seq_tech: str,
     summary: dict,
     previous_analysis: dict | None,
 ) -> str:
-    """The Slack summary: what is flagged, where the report is, and what moved since last time."""
+    """The Slack summary: what is flagged, where the reports are, and what moved since last time."""
     report_title = f'Somalier flags report ({seq_type} | {seq_tech})'
     messages = [
         f'*[{dataset}]* <{flags_html_url}|{report_title}>',
-        f'🔬 <{somalier_html_url}|Somalier relate report>',
         *_headline_lines(summary),
     ]
 
@@ -1130,6 +1160,8 @@ def summary_message_text(
         on_date = (previous_analysis['timestampCompleted'] or '').split('T')[0]
         messages.extend(_change_lines(summary, previous_analysis['meta']['summary'], on_date))
 
+    messages.extend(_level_link_line(link) for link in links)
+
     return '\n'.join(messages)
 
 
@@ -1137,17 +1169,17 @@ def construct_summary_message(
     dataset: str,
     *,
     flags_html_url: str,
-    somalier_html_url: str,
+    links: list[dict],
     seq_type: str,
     seq_tech: str,
     summary: dict,
     previous_analysis: dict | None,
 ):
-    """Construct a Slack message with a concise summary and a link to the report."""
+    """Construct a Slack message with a concise summary and links to the reports."""
     text = summary_message_text(
         dataset,
         flags_html_url=flags_html_url,
-        somalier_html_url=somalier_html_url,
+        links=links,
         seq_type=seq_type,
         seq_tech=seq_tech,
         summary=summary,
@@ -1158,12 +1190,20 @@ def construct_summary_message(
         send_message(text)
 
 
-def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: str, somalier_html_url: str) -> None:
+def main(
+    dataset: str,
+    output_html: str,
+    base_output_html: str,
+    flags_html_url: str,
+    flags_report_urls: dict[str, str],
+    pedigree_urls: dict[str, str],
+) -> None:
     """Query Metamist for Somalier flags and generate a Somalier flags HTML report."""
 
     dataset = dataset_for_access_level(dataset)
     seq_type = config_retrieve(['workflow', 'sequencing_type'])
     seq_tech = config_retrieve(['workflow', 'sequencing_technology'])
+    links = level_links(flags_report_urls, pedigree_urls, current_level=f'{seq_type}/{seq_tech}')
 
     logging_prefix = f'{dataset} ({seq_type} | {seq_tech})'
 
@@ -1198,7 +1238,7 @@ def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: 
         f'holding {summary["manually_resolved_flags"]} manually resolved'
     )
     started = perf_counter()
-    html = render_report(dataset, active_groups, resolved_groups, summary=summary)
+    html = render_report(dataset, active_groups, resolved_groups, summary=summary, links=links)
     logger.info(f'{logging_prefix} :: Rendered report in {perf_counter() - started:.1f}s')
 
     with to_path(base_output_html).open('w') as f:
@@ -1227,13 +1267,14 @@ def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: 
     )
     logger.info(f'{logging_prefix} :: Registered web analysis for {len(sequencing_groups)} SG(s)')
     logger.info(f'{logging_prefix} :: {flags_html_url}')
-    logger.info(f'{logging_prefix} :: {somalier_html_url}')
+    for level, url in pedigree_urls.items():
+        logger.info(f'{logging_prefix} :: pedigree check ({level}) {url}')
 
     meta.pop('summary')
     construct_summary_message(
         dataset,
         flags_html_url=flags_html_url,
-        somalier_html_url=somalier_html_url,
+        links=links,
         seq_type=seq_type,
         seq_tech=seq_tech,
         summary=summary,
@@ -1241,18 +1282,35 @@ def main(dataset: str, output_html: str, base_output_html: str, flags_html_url: 
     )
 
 
+def parse_level_urls(values: list[str]) -> dict[str, str]:
+    """Parse repeated 'type/technology=url' arguments into {'type/technology': url}."""
+    return dict(value.split('=', 1) for value in values)
+
+
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dataset', required=True, help='Metamist dataset/project name')
     parser.add_argument('--output-html', required=True, help='gs:// path to HTML (namespaced by timestamp)')
     parser.add_argument('--base-output-html', required=True, help='gs:// path to HTML (fixed, not namespaced)')
-    parser.add_argument('--flags-html-url', required=True, help='Clickable URL for the Somalier flags report')
-    parser.add_argument('--somalier-html-url', required=True, help='Clickable URL for the original Somalier report')
+    parser.add_argument('--flags-html-url', required=True, help='Clickable URL for this Somalier flags report')
+    parser.add_argument(
+        '--flags-report-url',
+        action='append',
+        default=[],
+        help='type/technology=url of the latest flags report for a sequencing level. Repeatable',
+    )
+    parser.add_argument(
+        '--somalier-html-url',
+        action='append',
+        default=[],
+        help='type/technology=url of the latest Somalier pedigree check for a sequencing level. Repeatable',
+    )
     args = parser.parse_args()
     main(
         dataset=args.dataset,
         output_html=args.output_html,
         base_output_html=args.base_output_html,
         flags_html_url=args.flags_html_url,
-        somalier_html_url=args.somalier_html_url,
+        flags_report_urls=parse_level_urls(args.flags_report_url),
+        pedigree_urls=parse_level_urls(args.somalier_html_url),
     )
