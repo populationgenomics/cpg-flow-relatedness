@@ -514,8 +514,21 @@ def get_project_sgs_and_fingerprints(project: str, filter_sgs: bool = False) -> 
                 logger.debug(f'{sg["id"]}: skipping SG with sequencing technology {seq_tech}')
                 continue
         sg_id = sg['id']
-        participant_id = sg['sample']['participant']['id']
-        participant_external_id = sg['sample']['participant']['externalId']
+        participant = (sg.get('sample') or {}).get('participant')
+        if participant is None:
+            # Without a participant an SG can't be identity- or pedigree-checked. Test projects hold such samples,
+            # so they're skipped there; in any other project it's a data problem and stops the run.
+            if config_retrieve(['workflow', 'access_level'], default=None) != 'test':
+                raise ValueError(
+                    f'{sg_id}: sample has no participant in Metamist. Skipping SGs without a participant is only '
+                    'allowed in test.'
+                )
+            logger.warning(
+                f'{sg_id}: sample has no participant in Metamist, skipping (only allowed in test, access_level=test)'
+            )
+            continue
+        participant_id = participant['id']
+        participant_external_id = participant['externalId']
         analyses = sg['analyses']
         somalier_path = analyses[0]['outputs'].get('path') if analyses else None
         entries.append(SgSomalierInfo(sg_id, participant_id, participant_external_id, somalier_path))
