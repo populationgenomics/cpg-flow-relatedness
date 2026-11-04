@@ -73,13 +73,13 @@ class LongReadQcVerifyBamId(stage.SequencingGroupStage):
         if sequencing_group.cram is None:
             return self.make_outputs(sequencing_group, error_msg=f'{sequencing_group.id}: no CRAM in Metamist')
 
-        job = lrs_verifybamid.verifybamid_job(
+        jobs = lrs_verifybamid.verifybamid_jobs(
             sg_id=sequencing_group.id,
             cram=sequencing_group.cram,
             output=output,
             job_attrs=self.get_job_attrs(sequencing_group),
         )
-        return self.make_outputs(sequencing_group, data=output, jobs=[job], meta={'stage': self.name})
+        return self.make_outputs(sequencing_group, data=output, jobs=jobs, meta={'stage': self.name})
 
 
 @stage.stage(
