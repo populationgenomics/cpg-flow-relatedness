@@ -11,7 +11,7 @@ from cpg_flow.filetypes import CramPath
 from cpg_utils import Path, config, hail_batch
 
 VERIFYBAMID_THREADS = 4
-
+BASE_STORAGE = 20
 
 def verifybamid_jobs(sg_id: str, cram: CramPath, output: Path, job_attrs: dict) -> list[Job]:
     """
@@ -31,7 +31,7 @@ def verifybamid_jobs(sg_id: str, cram: CramPath, output: Path, job_attrs: dict) 
     pileup_j = batch_instance.new_bash_job(f'Long-read VerifyBamID pileup {sg_id}', job_attrs | {'tool': 'samtools'})
     pileup_j.image(config.config_retrieve(['images', 'samtools']))
     try:
-        storage_gb = get_gcs_object_size(str(cram.path))
+        storage_gb = get_gcs_object_size(str(cram.path)) + BASE_STORAGE
     except NotFound:
         storage_gb = 100
     pileup_j.storage(f'{storage_gb}GiB')
