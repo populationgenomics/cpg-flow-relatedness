@@ -35,6 +35,7 @@ from rd_qc.scripts.somalier_flags_report import (
     count_manually_resolved,
     flag_sg_key,
     group_by_family,
+    level_links,
     referenced_sg_ids,
     render_report,
     split_active_resolved,
@@ -551,7 +552,7 @@ def message_for(summary, previous_analysis=None) -> str:
     return summary_message_text(
         'mock-dataset',
         flags_html_url=FLAGS_URL,
-        somalier_html_url=SOMALIER_URL,
+        links=level_links({'genome/short-read': FLAGS_URL}, {'genome/short-read': SOMALIER_URL}, 'genome/short-read'),
         seq_type='genome',
         seq_tech='short-read',
         summary=summary,
@@ -569,7 +570,8 @@ def test_message_leads_with_the_dataset_and_both_report_links():
     lines = message_for(summary).splitlines()
 
     assert lines[0] == f'*[mock-dataset]* <{FLAGS_URL}|Somalier flags report (genome | short-read)>'
-    assert SOMALIER_URL in lines[1]
+    # Per-level report and pedigree check links close the message
+    assert lines[-1] == f'🔬 genome, short-read: <{FLAGS_URL}|Flags report> · <{SOMALIER_URL}|Pedigree check>'
 
 
 def test_message_counts_conflicts_not_total_flags():

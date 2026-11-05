@@ -42,6 +42,7 @@ test = [
 
 [project.scripts]
 run_workflow = 'rd_qc.run_workflow:cli_main'
+run_workflow_lrs = 'rd_qc.run_workflow_lrs:cli_main'
 resolve_somalier_flag = 'rd_qc.scripts.resolve_somalier_flag:cli_main'
 
 [tool.hatch.build.targets.wheel]
