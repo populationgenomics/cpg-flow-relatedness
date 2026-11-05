@@ -30,19 +30,13 @@ END {{
     }}
 }}' {fai} > windows.bed"""
 
-# reads_mapped_percent from whole-CRAM idxstats, written as MultiQC custom content so it reaches the general stats
-# table. The windowed sample only ever sees mapped reads, so its own reads_mapped_percent is always ~100%.
-MAPPED_MQC_HEADER = """\
-# id: 'lrs_idxstats'
-# section_name: 'Long-read mapping (whole CRAM, samtools idxstats)'
-# plot_type: 'generalstats'
-Sample\treads_mapped_percent"""
-
 
 def samtools_stats_job(sg_id: str, cram: CramPath, outputs: dict[str, Path], job_attrs: dict) -> Job:
     """
     samtools stats on ~1M reads from evenly spaced autosomal windows, read via the CRAM index rather than a full pass,
-    for error_rate and the read length distribution. samtools idxstats on the whole CRAM for reads_mapped_percent.
+    for error_rate and the read length distribution. samtools idxstats on the whole CRAM for reads_mapped_percent,
+    which check_lrs_qc reads directly: the windowed sample only ever sees mapped reads, so its own
+    reads_mapped_percent is always ~100%.
     """
     batch_instance = hail_batch.get_batch()
 
@@ -74,16 +68,8 @@ def samtools_stats_job(sg_id: str, cram: CramPath, outputs: dict[str, Path], job
         | samtools stats -@ {SAMTOOLS_THREADS - 1} - > {j.stats}
 
     samtools idxstats {cram_localised} > {j.idxstats}
-
-    cat > {j.mapped_mqc} <<'EOF'
-{MAPPED_MQC_HEADER}
-EOF
-    awk -v sg={sg_id} '{{ mapped += $3; unmapped += $4 }}
-        END {{ printf "%s\\t%.4f\\n", sg, (mapped + unmapped) ? 100 * mapped / (mapped + unmapped) : 0 }}' \\
-        {j.idxstats} >> {j.mapped_mqc}
     """)
 
     batch_instance.write_output(j.stats, str(outputs['stats']))
     batch_instance.write_output(j.idxstats, str(outputs['idxstats']))
-    batch_instance.write_output(j.mapped_mqc, str(outputs['mapped_mqc']))
     return j

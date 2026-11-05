@@ -34,7 +34,6 @@ class LongReadQcSamtoolsStats(stage.SequencingGroupStage):
         return {
             'stats': to_path(f'{prefix}.samtools-stats'),
             'idxstats': to_path(f'{prefix}.idxstats'),
-            'mapped_mqc': to_path(f'{prefix}.lrs_mapped_mqc.tsv'),
         }
 
     def queue_jobs(self, sequencing_group: targets.SequencingGroup, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
@@ -112,7 +111,7 @@ class LongReadMultiQC(stage.DatasetStage):
             stats = inputs.as_dict(sg, LongReadQcSamtoolsStats)
             current_paths[sg.id] = [
                 str(stats['stats']),
-                str(stats['mapped_mqc']),
+                str(stats['idxstats']),
                 str(inputs.as_path(sg, LongReadQcVerifyBamId)),
             ]
 

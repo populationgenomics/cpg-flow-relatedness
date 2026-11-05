@@ -42,7 +42,7 @@ MOSDEPTH_TOOL = 'mosdepth'
 
 # Files written next to a registered output, found by name: {registered suffix: [companion suffixes]}
 COMPANION_SUFFIXES = {
-    '.samtools-stats': ['.lrs_mapped_mqc.tsv'],
+    '.samtools-stats': ['.idxstats'],
     '.mosdepth.global.dist.txt': ['.mosdepth.summary.txt'],
     '.mosdepth.summary.txt': ['.mosdepth.global.dist.txt'],
 }
@@ -150,13 +150,18 @@ def lrs_multiqc(
                 fh.write('\t'.join([sgid, new_sgid]) + '\n')
     sg_id_mapping_file = batch_instance.read_input(sg_id_mapping_file_path)
 
-    qc_inputs = batch_instance.read_input_group(**{basename(p): p for p in sorted(all_paths)})
+    # Copy each input to its original basename. Localised Batch inputs carry a random prefix (e.g. 'oCwHE.'), which
+    # MultiQC would take into the sample name, splitting one SG across rows.
+    copy_inputs = '\n'.join(f'cp {batch_instance.read_input(p)} qc_inputs/{basename(p)}' for p in sorted(all_paths))
 
-    endings = ', '.join(['.mosdepth', '.samtools-stats', '.verify-bamid.selfSM', '.lrs_mapped_mqc'])
+    endings = ', '.join(['.mosdepth', '.samtools-stats', '.verify-bamid.selfSM', '.idxstats'])
 
     mqc_j.command(
         f"""
-        multiqc -f $(dirname {qc_inputs}) -o output \\
+        mkdir -p qc_inputs
+        {copy_inputs}
+
+        multiqc -f qc_inputs -o output \\
         --replace-names {sg_id_mapping_file} \\
         --title "{title} for dataset <b>{dataset.name}</b>" \\
         --filename report.html \\
@@ -183,6 +188,7 @@ def lrs_multiqc(
         dataset_name=dataset.name,
         label=label,
         out_checks_path=outputs['checks'],
+        idxstats_paths={basename(p).split('.', 1)[0]: p for p in all_paths if p.endswith('.idxstats')},
         job_attrs=job_attrs,
     )
     check_j.depends_on(mqc_j)
@@ -221,16 +227,25 @@ def _check_report_job(
     multiqc_html_url: str,
     label: str,
     out_checks_path: Path,
+    idxstats_paths: dict[str, str],
     rich_id_map: dict[str, str] | None = None,
     job_attrs: dict | None = None,
 ) -> Job:
-    """Check the MultiQC JSON against the platform thresholds, and send a Slack summary if configured."""
+    """
+    Check the MultiQC JSON against the platform thresholds, and send a Slack summary if configured.
+
+    `idxstats_paths` ({SG ID: path}) are read directly for reads_mapped_percent, so it lands on the same sample as
+    the other metrics rather than in a separate MultiQC row.
+    """
     title = f'MultiQC [Long-read {label}]'
     check_j = b.new_job(f'{title} check', (job_attrs or {}) | {'tool': 'python'})
     resources.STANDARD.set_resources(j=check_j, ncpu=2)
     check_j.image(config.config_retrieve(['workflow', 'driver_image']))
 
     send_to_slack = config.config_retrieve(['lrs_qc', 'multiqc', 'send_to_slack'], True)
+    idxstats_args = ''.join(
+        f' \\\n    --idxstats {sg_id}={b.read_input(path)}' for sg_id, path in sorted(idxstats_paths.items())
+    )
 
     cmd = f"""\
     {_rich_sequencing_group_id_seds(rich_id_map, [multiqc_json_file]) if rich_id_map else ''}
@@ -241,7 +256,7 @@ def _check_report_job(
     --dataset {dataset_name} \\
     --title "{title}" \\
     --{'' if send_to_slack else 'no-'}send-to-slack \\
-    --output-json {check_j.output}
+    --output-json {check_j.output}{idxstats_args}
     """
 
     check_j.command(cmd)

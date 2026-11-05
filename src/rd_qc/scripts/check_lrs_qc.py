@@ -5,8 +5,8 @@ Ported from cpg-flow-rdrnaseq's scripts/check_multiqc.py, with three long-read d
 - thresholds are looked up per SG by its sequencing platform ([qc_thresholds.<platform>.*]), not sequencing type
 - mosdepth's metric names are mapped to the short-read names (MEDIAN_COVERAGE, PCT_20X), so one problem has one
   name in `cram_qc_flags` whichever technology it came from
-- reads_mapped_percent is only taken from the whole-CRAM idxstats section: samtools stats runs on a sample of
-  mapped reads, so its own reads_mapped_percent is always ~100%
+- reads_mapped_percent comes from the whole-CRAM `samtools idxstats` files, read here directly and added as their
+  own section: samtools stats runs on a sample of mapped reads, so its own reads_mapped_percent is always ~100%
 """
 
 import json
@@ -45,8 +45,29 @@ MOSDEPTH_METRIC_ALIASES: dict[str, tuple[str, float]] = {
     '20_x_pc': ('PCT_20X', 0.01),
 }
 
-# Metrics that are only valid from one MultiQC general stats section
-METRIC_SECTIONS: dict[str, str] = {'reads_mapped_percent': 'lrs_idxstats'}
+# Section holding reads_mapped_percent computed from whole-CRAM idxstats (see idxstats_section)
+IDXSTATS_SECTION = 'samtools_idxstats_whole_cram'
+
+# Metrics that are only valid from one general stats section
+METRIC_SECTIONS: dict[str, str] = {'reads_mapped_percent': IDXSTATS_SECTION}
+
+
+def mapped_percent(idxstats_path: str) -> float:
+    """% of reads mapped, from `samtools idxstats` output: name, length, mapped, unmapped per contig, plus '*'."""
+    mapped = unmapped = 0
+    with to_path(idxstats_path).open() as f:
+        for line in f:
+            fields = line.rstrip('\n').split('\t')
+            if len(fields) == 4:  # noqa: PLR2004
+                mapped += int(fields[2])
+                unmapped += int(fields[3])
+    total = mapped + unmapped
+    return 100 * mapped / total if total else 0.0
+
+
+def idxstats_section(idxstats_by_sg: dict[str, str]) -> dict[str, dict[str, float]]:
+    """{SG ID: {'reads_mapped_percent': value}} from each SG's whole-CRAM idxstats."""
+    return {sg_id: {'reads_mapped_percent': mapped_percent(path)} for sg_id, path in idxstats_by_sg.items()}
 
 
 def get_sg_platforms(dataset: str) -> dict[str, str]:
@@ -146,11 +167,14 @@ def run(
     title: str | None,
     send_to_slack: bool,
     output_json_path: str | None,
+    idxstats_by_sg: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     today = datetime.now()  # noqa: DTZ005
 
     with to_path(multiqc_json_path).open() as f:
         sections = general_stats_sections(json.load(f))
+    if idxstats_by_sg:
+        sections[IDXSTATS_SECTION] = idxstats_section(idxstats_by_sg)
     logger.info(
         'report_general_stats_data: '
         + ', '.join(f'{name}={len(section)} samples' for name, section in sections.items())
@@ -218,6 +242,12 @@ if __name__ == '__main__':
     parser.add_argument('--title', help='Report title')
     parser.add_argument('--send-to-slack', action=BooleanOptionalAction, default=True, help='Post the summary')
     parser.add_argument('--output-json', help='Path to write structured QC flags JSON output')
+    parser.add_argument(
+        '--idxstats',
+        action='append',
+        default=[],
+        help="SG_ID=path of an SG's whole-CRAM samtools idxstats, for reads_mapped_percent. Repeatable",
+    )
     args = parser.parse_args()
     run(
         multiqc_json_path=args.multiqc_json,
@@ -226,4 +256,5 @@ if __name__ == '__main__':
         title=args.title,
         send_to_slack=args.send_to_slack,
         output_json_path=args.output_json,
+        idxstats_by_sg=dict(value.split('=', 1) for value in args.idxstats),
     )
