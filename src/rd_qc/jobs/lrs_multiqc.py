@@ -6,6 +6,7 @@ stage inputs, so SGs whose QC ran in an earlier workflow run are still included.
 """
 
 from collections import defaultdict
+from datetime import datetime
 from os.path import basename
 
 from hailtop.batch import Batch, Resource, ResourceFile
@@ -88,6 +89,23 @@ def _get_registered_qc_paths(dataset_name: str) -> dict[str, list[str]]:
     return dict(sg_paths)
 
 
+def _multiqc_name(sg_id: str, path: str) -> str:
+    """
+    The file name MultiQC sees for a QC input.
+
+    Ingested mosdepth outputs keep their upstream names (e.g. pipeface's `CPG123_EXT.hg38.mosdepth.depth.txt`), which
+    MultiQC's mosdepth module doesn't recognise and whose prefix isn't the SG ID. They're renamed to
+    `<SG ID>.mosdepth.global.dist.txt` or, for the per-contig summary table pipeface writes, `.mosdepth.summary.txt`.
+    Everything else keeps its own name, which already starts with the SG ID.
+    """
+    name = basename(path)
+    if '.mosdepth.' not in name:
+        return name
+    if name.endswith('.global.dist.txt'):
+        return f'{sg_id}.mosdepth.global.dist.txt'
+    return f'{sg_id}.mosdepth.summary.txt'
+
+
 def _add_companion_paths(sg_paths: dict[str, list[str]]) -> None:
     """Add the files written next to each registered output (see COMPANION_SUFFIXES), if they exist."""
     for paths in sg_paths.values():
@@ -143,16 +161,21 @@ def lrs_multiqc(
     mqc_j.cpu(8)
     mqc_j.storage('20Gi')
 
-    sg_id_mapping_file_path = tmp_prefix / f'{dataset.get_alignment_inputs_hash()}_rename-sg-map.tsv'
+    run_date = datetime.now().astimezone().strftime('%Y-%m-%d')
+    sg_id_mapping_file_path = tmp_prefix / f'{run_date}_rename-sg-map.tsv'
     if not config.config_retrieve(['workflow', 'dry_run'], False):
         with sg_id_mapping_file_path.open('w') as fh:
             for sgid, new_sgid in sequencing_group_id_map.items():
                 fh.write('\t'.join([sgid, new_sgid]) + '\n')
     sg_id_mapping_file = batch_instance.read_input(sg_id_mapping_file_path)
 
-    # Copy each input to its original basename. Localised Batch inputs carry a random prefix (e.g. 'oCwHE.'), which
-    # MultiQC would take into the sample name, splitting one SG across rows.
-    copy_inputs = '\n'.join(f'cp {batch_instance.read_input(p)} qc_inputs/{basename(p)}' for p in sorted(all_paths))
+    # Copy each input to a clean name. Localised Batch inputs carry a random prefix (e.g. 'oCwHE.'), which MultiQC
+    # would take into the sample name, splitting one SG across rows.
+    copy_inputs = '\n'.join(
+        f'cp {batch_instance.read_input(p)} qc_inputs/{_multiqc_name(sg_id, p)}'
+        for sg_id, paths in sorted(sg_paths.items())
+        for p in sorted(set(paths))
+    )
 
     endings = ', '.join(['.mosdepth', '.samtools-stats', '.verify-bamid.selfSM', '.idxstats'])
 

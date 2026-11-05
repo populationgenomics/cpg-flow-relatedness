@@ -7,6 +7,8 @@ long-read input_cohorts. Short-read CRAM QC happens upstream, in align-genotype,
 (run_workflow) has no equivalent of these.
 """
 
+from datetime import datetime
+
 from rd_qc.jobs import lrs_multiqc, lrs_samtools_stats, lrs_verifybamid
 from rd_qc.stages import (
     GenerateMissingSomalierFingerprints,
@@ -94,12 +96,13 @@ class LongReadMultiQC(stage.DatasetStage):
     """
 
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
-        sg_hash = dataset.get_alignment_inputs_hash()
+        # Dated, so the report reruns at most once a day unless forced
+        run_date = datetime.now().astimezone().strftime('%Y-%m-%d')
         return {
             'latest': dataset.web_prefix() / 'qc' / 'long_read' / 'latest' / 'multiqc.html',
-            'html': dataset.web_prefix() / 'qc' / 'long_read' / sg_hash / 'multiqc.html',
-            'json': dataset.prefix() / 'qc' / 'long_read' / sg_hash / 'multiqc_data.json',
-            'checks': dataset.prefix() / 'qc' / 'long_read' / sg_hash / 'qc-checks.json',
+            'html': dataset.web_prefix() / 'qc' / 'long_read' / run_date / 'multiqc.html',
+            'json': dataset.prefix() / 'qc' / 'long_read' / run_date / 'multiqc_data.json',
+            'checks': dataset.prefix() / 'qc' / 'long_read' / run_date / 'qc-checks.json',
         }
 
     def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
