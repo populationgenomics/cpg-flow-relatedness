@@ -161,7 +161,8 @@ def lrs_multiqc(
         --title "{title} for dataset <b>{dataset.name}</b>" \\
         --filename report.html \\
         --cl-config "extra_fn_clean_exts: [{endings}]" \\
-        --cl-config "max_table_rows: 10000"
+        --cl-config "max_table_rows: 10000" \\
+        --cl-config "use_filename_as_sample_name: [verifybamid/selfsm]"
 
         cp output/report.html {mqc_j.html}
         cp output/report_data/multiqc_data.json {mqc_j.json}
