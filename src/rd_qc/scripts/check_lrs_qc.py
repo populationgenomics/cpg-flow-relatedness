@@ -203,11 +203,9 @@ def run(
         with to_path(output_json_path).open('w') as f:
             json.dump(result, f, indent=2)
 
+    # A failed Slack post fails the job, as it does in the other rd_qc checks
     if send_to_slack:
-        try:
-            send_message(text)
-        except (OSError, ValueError):
-            logger.exception('Failed to send Slack notification, continuing without it')
+        send_message(text)
 
     return result
 
