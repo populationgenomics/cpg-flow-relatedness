@@ -15,19 +15,78 @@ send_to_slack = false  # Pedigree issues are sent to slack via the flags report
 [somalier_flags_report]
 send_to_slack = true
 
+[slack]
+channel = 'workflows-qc'
+token_secret_id = 'slack-seqr-loader-token'
+token_project_id = 'seqr-308602'
+
 [somalier_extract]
 # Priority order for source file selection when extracting fingerprints
 # Options: "gvcf", "cram"
 priority = [ "cram", "gvcf" ]
 storage_buffer = 20
 
+# Long-read CRAM QC. These stages only run when workflow.sequencing_technology = 'long-read',
+# which is set (with the long-read input_cohorts) as an override at submission.
+[lrs_qc.samtools_stats]
+# samtools stats runs on a representative sample: evenly spaced windows across chr1-22, read via the
+# CRAM index. ~500 x 1 Mb is ~1M reads at ~30x with ~15 kb reads.
+n_windows = 500
+window_bp = 1_000_000
+
+[lrs_qc.multiqc]
+# align-genotype's SG QC report never sees long-read SGs, so this is where long-read QC flags reach Slack
+send_to_slack = true
+
+# Long-read CRAM QC thresholds, keyed by SG platform: [qc_thresholds.<platform>.<severity>.<direction>].
+# A metric is flagged when it falls below its `under` threshold or rises above its `over` threshold.
+# Shared metrics use the short-read names and start at align-genotype's genome thresholds.
+# error_rate is long-read only and a placeholder until tuned on real cohorts.
+[qc_thresholds.pacbio.warn.under]
+"MEDIAN_COVERAGE" = 25
+"PCT_20X" = 0.85
+"reads_mapped_percent" = 97
+
+[qc_thresholds.pacbio.fail.under]
+"MEDIAN_COVERAGE" = 15
+"PCT_20X" = 0.75
+"reads_mapped_percent" = 80
+
+[qc_thresholds.pacbio.warn.over]
+"error_rate" = 0.01
+"FREEMIX" = 0.02
+
+[qc_thresholds.pacbio.fail.over]
+"error_rate" = 0.02
+"FREEMIX" = 0.04
+
+# ONT: the same as PacBio, except error_rate, which sits higher for ONT reads. Its values are placeholders until
+# tuned on real ONT cohorts; FREEMIX may also read slightly high on ONT, so check it against a known-clean sample.
+[qc_thresholds.oxford-nanopore.warn.under]
+"MEDIAN_COVERAGE" = 25
+"PCT_20X" = 0.85
+"reads_mapped_percent" = 97
+
+[qc_thresholds.oxford-nanopore.fail.under]
+"MEDIAN_COVERAGE" = 15
+"PCT_20X" = 0.75
+"reads_mapped_percent" = 80
+
+[qc_thresholds.oxford-nanopore.warn.over]
+"error_rate" = 0.03
+"FREEMIX" = 0.02
+
+[qc_thresholds.oxford-nanopore.fail.over]
+"error_rate" = 0.05
+"FREEMIX" = 0.04
+
 [references]
 somalier_sites = "gs://cpg-common-main/references/somalier/sites.hg38.vcf.gz"
+# VerifyBamID2 SVD resource (.UD / .mu / .bed), the same 1000G set the short-read CRAM QC uses
+contam_svd_prefix = "gs://cpg-common-main/references/hg38/v0/contamination-resources/1000g/1000g.phase3.100k.b38.vcf.gz.dat"
 
 [images]
 somalier = "australia-southeast1-docker.pkg.dev/cpg-common/images/somalier:0.3.1-1"
-
-[slack]
-channel = 'workflows-qc'
-token_secret_id = 'slack-seqr-loader-token'
-token_project_id = 'seqr-308602'
+samtools = "australia-southeast1-docker.pkg.dev/cpg-common/images/samtools:1.23.1-1"
+verifybamid = "australia-southeast1-docker.pkg.dev/cpg-common/images/verifybamid:v2.0.3-1"
+multiqc = "australia-southeast1-docker.pkg.dev/cpg-common/images/multiqc:1.33-1"
