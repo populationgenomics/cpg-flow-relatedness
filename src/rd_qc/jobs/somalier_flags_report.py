@@ -11,17 +11,24 @@ def somalier_flags_report_job(
     dataset: str,
     outputs: dict[str, Path],
     out_html_url: str,
-    somalier_html_url: str,
+    flags_report_urls: dict[str, str],
+    pedigree_urls: dict[str, str],
     job_attrs: dict,
 ) -> Job:
     """
     Create a Hail Batch job that queries Metamist for all relatedness flags in the dataset.
     Generates a summary HTML report showing all open and resolved relatedness flags.
+
+    `flags_report_urls` and `pedigree_urls` are keyed by 'type/technology', linking the latest report and
+    pedigree check of each sequencing level in the dataset.
     """
     batch = hail_batch.get_batch()
 
     j = batch.new_bash_job(f'Somalier Flags Report: {dataset}', job_attrs | {'tool': 'python'})
     j.image(config.config_retrieve(['workflow', 'driver_image'])).memory('standard').cpu(2)
+
+    link_args = ''.join(f' \\\n        --flags-report-url {key}={url}' for key, url in flags_report_urls.items())
+    link_args += ''.join(f' \\\n        --somalier-html-url {key}={url}' for key, url in pedigree_urls.items())
 
     j.command(
         f"""\
@@ -29,8 +36,7 @@ def somalier_flags_report_job(
         --dataset {dataset} \\
         --output-html {outputs['timestamped']} \\
         --base-output-html {outputs['html']} \\
-        --flags-html-url {out_html_url} \\
-        --somalier-html-url {somalier_html_url}
+        --flags-html-url {out_html_url}{link_args}
     """
     )
 

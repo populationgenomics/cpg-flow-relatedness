@@ -7,7 +7,10 @@ from rd_qc.utils import (
     build_ped_content,
     convert_to_web_url,
     find_sgids_without_somalier,
+    flags_report_base_html_path,
+    get_project_sequencing_levels,
     get_project_sgs_and_fingerprints,
+    pedigree_base_html_path,
     select_somalier_extract_targets,
     sg_ids_tag,
 )
@@ -161,19 +164,20 @@ class SomalierPedigreeCheck(stage.DatasetStage):
         """
         Expected outputs for the somalier pedigree check stage.
 
-        Files are written to paths namespaced by the AR GUID to avoid collisions between runs of the workflow.
+        Files are written under the sequencing type and technology the check is scoped to, then namespaced by
+        the AR GUID to avoid collisions between runs of the workflow.
 
-        The final HTML report is written to both a path with and without namespacing, so that it is updated
+        The final HTML report is written to both a path with and without the AR GUID, so that it is updated
         with each run, whilst also preserving the previous run's report for reference.
         """
         ar_guid: str = config.config_retrieve(['workflow', 'ar-guid'])
-        prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / ar_guid
+        seq_type: str = config.config_retrieve(['workflow', 'sequencing_type'])
+        seq_tech: str = config.config_retrieve(['workflow', 'sequencing_technology'])
+
+        prefix = dataset.prefix() / 'somalier_checks' / 'pedigree' / seq_type / seq_tech / ar_guid
         output_prefix = prefix / dataset.name
 
-        base_web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree'
-        base_web_output_prefix = base_web_prefix / dataset.name
-
-        web_prefix = base_web_prefix / ar_guid
+        web_prefix = dataset.web_prefix() / 'somalier_checks' / 'pedigree' / seq_type / seq_tech / ar_guid
         web_output_prefix = web_prefix / dataset.name
 
         return {
@@ -181,7 +185,7 @@ class SomalierPedigreeCheck(stage.DatasetStage):
             'pairs': to_path(f'{output_prefix}.pairs.tsv'),
             'expected_ped': prefix / f'{dataset.name}.expected.ped',
             'html': to_path(f'{web_output_prefix}.html'),
-            'base_html_url': to_path(f'{base_web_output_prefix}.html'),
+            'base_html_url': pedigree_base_html_path(dataset, seq_type, seq_tech),
             'checks': prefix / f'{dataset.name}-checks.done',
             'json': to_path(f'{output_prefix}.checks.json'),
         }
@@ -233,25 +237,43 @@ class GenerateSomalierFlagsReport(stage.DatasetStage):
     """
 
     def expected_outputs(self, dataset: targets.Dataset) -> dict[str, Path]:
+        seq_type: str = config.config_retrieve(['workflow', 'sequencing_type'])
+        seq_tech: str = config.config_retrieve(['workflow', 'sequencing_technology'])
         timestamp = datetime.now().astimezone().strftime('%Y-%m-%d_%H%M%S')
+        base_html = flags_report_base_html_path(dataset, seq_type, seq_tech)
         return {
-            'timestamped': dataset.web_prefix() / 'somalier_flags' / timestamp / 'somalier_flags_report.html',
-            'html': dataset.web_prefix() / 'somalier_flags' / 'somalier_flags_report.html',
+            'timestamped': base_html.parent / timestamp / base_html.name,
+            'html': base_html,
         }
 
-    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:
+    def queue_jobs(self, dataset: targets.Dataset, inputs: stage.StageInput) -> stage.StageOutput:  # noqa: ARG002
         outputs = self.expected_outputs(dataset)
 
-        out_html_url = convert_to_web_url(dataset.name, outputs['html'])
-        somalier_html_url = convert_to_web_url(
-            dataset.name, inputs.as_path_by_target(SomalierPedigreeCheck, 'base_html_url')[dataset.name]
+        dataset_name = config.dataset_for_access_level(dataset.name)
+        current_level = (
+            config.config_retrieve(['workflow', 'sequencing_type']),
+            config.config_retrieve(['workflow', 'sequencing_technology']),
         )
+
+        # Link the latest flags report and pedigree check of every (type, technology) in the dataset. This run's
+        # own pages are always linked, since they are only written once this batch runs.
+        flags_report_urls: dict[str, str] = {}
+        pedigree_urls: dict[str, str] = {}
+        for level in sorted(get_project_sequencing_levels(dataset_name)):
+            key = '/'.join(level)
+            flags_html = flags_report_base_html_path(dataset, *level)
+            pedigree_html = pedigree_base_html_path(dataset, *level)
+            if level == current_level or exists(flags_html):
+                flags_report_urls[key] = convert_to_web_url(dataset.name, flags_html)
+            if level == current_level or exists(pedigree_html):
+                pedigree_urls[key] = convert_to_web_url(dataset.name, pedigree_html)
 
         jobs = somalier_flags_report.somalier_flags_report_job(
             dataset=dataset.name,
             outputs=outputs,
-            out_html_url=out_html_url,
-            somalier_html_url=somalier_html_url,
+            out_html_url=convert_to_web_url(dataset.name, outputs['html']),
+            flags_report_urls=flags_report_urls,
+            pedigree_urls=pedigree_urls,
             job_attrs=self.get_job_attrs(dataset),
         )
         return self.make_outputs(dataset, data=outputs, jobs=jobs)

@@ -13,6 +13,7 @@
         h2 { font-size: 1.15rem; margin: 32px 0 12px; display: flex; align-items: baseline; gap: 8px; }
         h2 .count { font-size: 0.85rem; font-weight: 400; color: #636e72; }
         .subtitle { color: #636e72; font-size: 0.9rem; margin-bottom: 6px; }
+        .level-links { color: #636e72; font-size: 0.85rem; margin-bottom: 6px; }
         .blurb { color: #636e72; font-size: 0.85rem; max-width: 800px; line-height: 1.45;
                  margin-bottom: 24px; }
 
@@ -308,6 +309,18 @@
 <div class="container">
     <h1>Somalier Relatedness Flag Summary</h1>
     <p class="subtitle">{{ dataset }} &mdash; generated {{ generated_at }}</p>
+    {# Reports and pedigree checks are scoped per sequencing type and technology, so link each level's latest
+       pages. This report's own link is left out: it is the page being read. #}
+    {% if level_links %}
+    <p class="level-links">
+        {% for link in level_links %}
+        <span>{{ link.label }}{% if link.is_current %} (this report){% endif %}:
+            {% if link.flags_url and not link.is_current %}<a href="{{ link.flags_url }}">Flags report</a>{% if link.pedigree_url %} &middot; {% endif %}{% endif %}
+            {% if link.pedigree_url %}<a href="{{ link.pedigree_url }}">Pedigree check</a>{% endif %}
+        </span>{% if not loop.last %} &nbsp;|&nbsp; {% endif %}
+        {% endfor %}
+    </p>
+    {% endif %}
     <p class="blurb">Relatedness issues flagged by analysis of Somalier report data, grouped by family. A pedigree
         mismatch between two families is listed under both of them, and counted once. Click any family to see the
         measured values and the sequencing groups involved.</p>
