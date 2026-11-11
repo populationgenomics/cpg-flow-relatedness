@@ -179,6 +179,15 @@ def lrs_multiqc(
 
     endings = ', '.join(['.mosdepth', '.samtools-stats', '.verify-bamid.selfSM', '.idxstats'])
 
+    # Hide what long-read data leaves empty or misleading (IDs from MultiQC 1.33):
+    # - samtools stats runs on a sample of mapped reads, so its % mapped is always ~100% and its alignment stats are
+    #   all zero bar mapped bases (no pairs, duplicates or unmapped reads). The real % mapped comes from idxstats.
+    # - VerifyBamID reads a pileup with no BAM header, so read group and read count are NA.
+    hidden_columns = (
+        "{'Samtools: stats': {reads_mapped_percent: false}, verifybamid-table: {RG: false, '#READS': false}}"
+    )
+    removed_sections = '[samtools-stats, samtools-stats-alignment]'
+
     mqc_j.command(
         f"""
         mkdir -p qc_inputs
@@ -191,7 +200,9 @@ def lrs_multiqc(
         --cl-config "extra_fn_clean_exts: [{endings}]" \\
         --cl-config "max_table_rows: 10000" \\
         --cl-config "log_filesize_limit: 2000000000" \\
-        --cl-config "use_filename_as_sample_name: [verifybamid/selfsm]"
+        --cl-config "use_filename_as_sample_name: [verifybamid/selfsm]" \\
+        --cl-config "table_columns_visible: {hidden_columns}" \\
+        --cl-config "remove_sections: {removed_sections}"
 
         cp output/report.html {mqc_j.html}
         cp output/report_data/multiqc_data.json {mqc_j.json}
