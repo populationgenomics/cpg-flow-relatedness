@@ -13,6 +13,7 @@ from cpg_utils import Path, config, hail_batch
 VERIFYBAMID_THREADS = 4
 BASE_STORAGE = 20
 
+
 def verifybamid_jobs(sg_id: str, cram: CramPath, output: Path, job_attrs: dict) -> list[Job]:
     """
     Pile up the CRAM at the SVD resource's marker sites with samtools, then run VerifyBamID2 on that pileup.
